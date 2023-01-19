@@ -1,10 +1,11 @@
 {
-  "name": "inotebook-backend",
+  "name": "squareroorwo_backend",
   "version": "1.0.0",
-  "description": "iNotebook - Your notebook on the cloud",
+  "description": "Square Root Two Technologies",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node index.js"
   },
   "author": "",
   "license": "ISC",
