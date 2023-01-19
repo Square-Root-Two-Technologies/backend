@@ -1,13 +1,17 @@
 const mongoose = require("mongoose");
+const dotenv = require("dotenv");
+dotenv.config({ path: "./config.env" });
 
-const mongoURI =
-  "mongodb://squareroottwo:Q9Vc5jBvnfCRdomDF0SvNNFwFwwwcMT86v5vm73ZdnhuwWT7IFGuYSzsv8Sdiy4wg2qUvHS441HkACDbV20lQg%3D%3D@squareroottwo.mongo.cosmos.azure.com:10255/?ssl=true&replicaSet=globaldb&retrywrites=false&maxIdleTimeMS=120000&appName=@squareroottwo@";
+const mongoURI = process.env.DATABASE;
 //"mongodb://localhost:27017/iNotebook?readPreference=primary&appname=MongoDB%20Compass&directConnection=true&ssl=false";
 
 const connectToMongo = () => {
-  mongoose.connect(mongoURI, () => {
-    console.log("Connected to Mongo Successfully");
-  });
+  mongoose
+    .connect(mongoURI, () => {
+      console.log(mongoURI);
+      console.log("Connected to Mongo Successfully");
+    })
+    .catch((err) => console.log("no connection"));
 };
 
 module.exports = connectToMongo;
