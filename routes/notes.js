@@ -7,9 +7,10 @@ const { body, validationResult } = require("express-validator");
 //ROUTE 0: Get all notes for blogspace without edit and delete option irrespective of user
 router.get("/fetchNotesIrrespective", async (req, res) => {
   try {
-    const allNotes = await Note.find({ name: "" });
-    res.json(allNotes);
+    allNotes = await Note.find({});
+    res.status(200).json(allNotes);
   } catch (err) {
+    response.status(500).json(error);
     console.log(err);
   }
 });
@@ -31,7 +32,7 @@ router.post(
   fetchuser,
   [
     body("title", "Enter a valid title").isLength({ min: 3 }),
-    body("description", "Description must be atleast 5 characters").isLength({
+    body("description", "description must be atleast 5 characters").isLength({
       min: 5,
     }),
   ],

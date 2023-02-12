@@ -8,10 +8,13 @@ mongoose.set("strictQuery", false);
 const connectToMongo = () => {
   mongoose
     .connect(mongoURI, () => {
-      console.log(mongoURI);
+      //console.log(mongoURI);
       console.log("Connected to Mongo Successfully");
     })
-    .catch((err) => console.log("no connection"));
+    .catch((err) => {
+      console.log("no connection");
+      console.log(err);
+    });
 };
 
 module.exports = connectToMongo;
