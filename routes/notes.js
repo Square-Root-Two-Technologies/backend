@@ -3,6 +3,19 @@ const router = express.Router();
 const fetchuser = require("../middleware/fetchuser");
 const Note = require("../models/Note");
 const { body, validationResult } = require("express-validator");
+const { request } = require("express");
+
+//ROUTE -1: get a note by its id
+router.get("/fetchNotesIrrespective/:id", async (req, res) => {
+  try {
+    const id = req.params.id;
+    const note = await Note.findOne({ _id: id });
+    res.status(200).json(note);
+  } catch (err) {
+    res.status(500).json(err);
+    console.log(err);
+  }
+});
 
 //ROUTE 0: Get all notes for blogspace without edit and delete option irrespective of user
 router.get("/fetchNotesIrrespective", async (req, res) => {
