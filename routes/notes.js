@@ -39,6 +39,18 @@ router.get("/fetchallnotes", fetchuser, async (req, res) => {
   }
 });
 
+//ROUTE BY TYPE
+router.get("/fetchNotesIrrespectiveByType/:type", async (req, res) => {
+  try {
+    const type = req.params.type;
+    const note = await Note.find({ type: type });
+    res.status(200).json(note);
+  } catch (err) {
+    res.status(500).json(err);
+    console.log(err);
+  }
+});
+
 // ROUTE 2: Add a new Note using: POST "/api/notes/addnote". Login required
 router.post(
   "/addnote",
@@ -48,10 +60,12 @@ router.post(
     body("description", "description must be atleast 5 characters").isLength({
       min: 5,
     }),
+    body("type"),
+    body("tag"),
   ],
   async (req, res) => {
     try {
-      const { title, description, tag } = req.body;
+      const { title, description, tag, type } = req.body;
 
       // If there are errors, return Bad request and the errors
       const errors = validationResult(req);
@@ -62,6 +76,7 @@ router.post(
         title,
         description,
         tag,
+        type,
         user: req.user.id,
       });
       const savedNote = await note.save();
@@ -76,7 +91,7 @@ router.post(
 
 // ROUTE 3: Update an existing Note using: PUT "/api/notes/updatenote". Login required
 router.put("/updatenote/:id", fetchuser, async (req, res) => {
-  const { title, description, tag } = req.body;
+  const { title, description, tag, type } = req.body;
   try {
     // Create a newNote object
     const newNote = {};
@@ -88,6 +103,9 @@ router.put("/updatenote/:id", fetchuser, async (req, res) => {
     }
     if (tag) {
       newNote.tag = tag;
+    }
+    if (type) {
+      newNote.type = type;
     }
 
     // Find the note to be updated and update it
