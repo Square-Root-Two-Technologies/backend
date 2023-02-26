@@ -18,6 +18,12 @@ const NotesSchema = new Schema({
     type: String,
     default: "General",
   },
+  type: {
+    type: String,
+    enum: ["JavaScript", "Salesforce", "Sociology", "Life"],
+    required: true,
+  },
+
   date: {
     type: Date,
     default: Date.now,

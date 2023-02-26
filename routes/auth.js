@@ -10,7 +10,9 @@ const JWT_SECRET = "Harryisagoodb$oy";
 
 //test
 router.get("/", (req, res) => {
-  console.log("hello");
+  console.log(
+    "hello you have reached the offices of square root two technologies"
+  );
 });
 
 // ROUTE 1: Create a User using: POST "/api/auth/createuser". No login required
@@ -22,6 +24,9 @@ router.post(
     body("password", "Password must be atleast 5 characters").isLength({
       min: 5,
     }),
+    body("country", "Enter a valid country").isLength({ min: 2 }),
+    body("city", "Enter a valid city").isLength({ min: 1 }),
+    body("about"),
   ],
   async (req, res) => {
     let success = false;
@@ -47,6 +52,9 @@ router.post(
         name: req.body.name,
         password: secPass,
         email: req.body.email,
+        country: req.body.country,
+        city: req.body.city,
+        about: req.body.about,
       });
       const data = {
         user: {
