@@ -23,7 +23,7 @@ router.get("/fetchNotesIrrespective", async (req, res) => {
     allNotes = await Note.find({});
     res.status(200).json(allNotes);
   } catch (err) {
-    response.status(500).json(error);
+    response.status(500).json(err);
     console.log(err);
   }
 });
@@ -43,7 +43,12 @@ router.get("/fetchallnotes", fetchuser, async (req, res) => {
 router.get("/fetchNotesIrrespectiveByType/:type", async (req, res) => {
   try {
     const type = req.params.type;
-    const note = await Note.find({ type: type });
+    let note;
+    if (type === "all") {
+      note = await Note.find({});
+    } else {
+      note = await Note.find({ type: type });
+    }
     res.status(200).json(note);
   } catch (err) {
     res.status(500).json(err);
