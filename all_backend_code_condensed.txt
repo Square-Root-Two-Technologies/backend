@@ -1,0 +1,917 @@
+// --- File Structure ---
+{
+  "config.env": true,
+  "db.js": true,
+  "index.js": true,
+  "middleware": {
+    "fetchuser.js": true,
+    "restrictToOwnerOrAdmin.js": true
+  },
+  "models": {
+    "Note.js": true,
+    "User.js": true
+  },
+  "package.json": true,
+  "populateTestData.js": true,
+  "routes": {
+    "auth.js": true,
+    "notes.js": true
+  }
+}
+
+// --- Aggregated Code Content (Comments and Blank Lines Removed) ---
+
+// FILE: config.env
+DATABASE = mongodb+srv://tanvirraihanislam2020:HBvqo4zAq5WwUqCZ@website2025.vgtt4.mongodb.net/?retryWrites=true&w=majority&appName=Website2025
+JWT_SECRET = Harryisagoodb$oy
+
+// FILE: db.js
+const mongoose = require("mongoose");
+const dotenv = require("dotenv");
+dotenv.config({ path: "./config.env" });
+const mongoURI = process.env.DATABASE;
+mongoose.set("strictQuery", false);
+const connectToMongo = () => {
+  mongoose
+    .connect(mongoURI, () => {
+      console.log("Connected to Mongo Successfully");
+    })
+    .catch((err) => {
+      console.log("no connection");
+      console.log(err);
+    });
+};
+module.exports = connectToMongo;
+
+// FILE: index.js
+const connectToMongo = require("./db");
+const express = require("express");
+var cors = require("cors");
+connectToMongo();
+const app = express();
+const port = 5000;
+app.use(cors());
+app.use(express.json());
+app.use("/api/auth", require("./routes/auth"));
+app.use("/api/notes", require("./routes/notes"));
+app.listen(port, () => {
+  console.log(`squareroottwo backend listening at http://localhost:${port}`);
+});
+
+// FILE: middleware/fetchuser.js
+const jwt = require("jsonwebtoken");
+require("dotenv").config({ path: "../config.env" }); 
+const JWT_SECRET = process.env.JWT_SECRET;
+const fetchuser = (req, res, next) => {
+  const token = req.header("auth-token");
+  if (!token) {
+    res.status(401).send({ error: "Please authenticate using a valid token" });
+  }
+  try {
+    const data = jwt.verify(token, JWT_SECRET);
+    req.user = data.user;
+    next();
+  } catch (error) {
+    res.status(401).send({ error: "Please authenticate using a valid token" });
+  }
+};
+module.exports = fetchuser;
+
+// FILE: middleware/restrictToOwnerOrAdmin.js
+const mongoose = require("mongoose");
+const Note = require("../models/Note");
+const User = require("../models/User");
+const restrictToOwnerOrAdmin = async (req, res, next) => {
+  if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+    return res.status(400).json({ error: "Invalid Note ID" });
+  }
+  const note = await Note.findById(req.params.id);
+  if (!note) return res.status(404).json({ error: "Not Found" });
+  const user = await User.findById(req.user.id).select("role");
+  if (!user) return res.status(401).json({ error: "User not found" });
+  if (note.user.toString() !== req.user.id && user.role !== "admin") {
+    return res.status(401).json({ error: "Not Allowed" });
+  }
+  req.note = note; 
+  req.requestingUser = user; 
+  next();
+};
+module.exports = restrictToOwnerOrAdmin;
+
+// FILE: models/Note.js
+const mongoose = require("mongoose");
+const { Schema } = mongoose;
+const NotesSchema = new Schema({
+  user: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "user",
+  },
+  title: {
+    type: String,
+    required: true,
+  },
+  description: {
+    type: String,
+    required: true,
+  },
+  tag: {
+    type: String,
+    default: "General",
+  },
+  type: {
+    type: String,
+    enum: [
+      "JavaScript",
+      "Salesforce",
+      "Sociology",
+      "Life",
+      "Technology",
+      "Creative",
+      "Tutorial",
+      "News",
+    ],
+    required: true,
+  },
+  date: {
+    type: Date,
+    default: Date.now,
+  },
+  readTimeMinutes: {
+    type: Number,
+    required: false, 
+  },
+  isFeatured: {
+    type: Boolean,
+    default: false,
+    index: true,
+  },
+});
+module.exports = mongoose.model("notes", NotesSchema);
+
+// FILE: models/User.js
+const mongoose = require("mongoose");
+const { Schema } = mongoose;
+const UserSchema = new Schema({
+  name: {
+    type: String,
+    required: true,
+  },
+  email: {
+    type: String,
+    required: true,
+    unique: true,
+  },
+  password: {
+    type: String,
+    required: true,
+  },
+  date: {
+    type: Date,
+    default: Date.now,
+  },
+  country: {
+    type: String,
+    required: false,
+  },
+  city: {
+    type: String,
+    required: false,
+  },
+  about: {
+    type: String,
+    required: false,
+    default: "about is empty",
+  },
+  avatarUrl: {
+    type: String,
+    required: false,
+    default: null,
+  },
+  role: {
+    type: String,
+    required: true,
+    enum: ["user", "admin"], 
+    default: "user", 
+  },
+});
+const User = mongoose.model("user", UserSchema);
+module.exports = User;
+
+// FILE: package.json
+{"name":"squareroorwo_backend","version":"1.0.0","description":"Square Root Two Technologies","main":"index.js","scripts":{"test":"echo \"Error: no test specified\" && exit 1","start":"node index.js"},"author":"","license":"ISC","dependencies":{"bcryptjs":"^2.4.3","cors":"^2.8.5","dotenv":"^16.0.3","express":"^4.17.1","express-validator":"^6.12.1","jsonwebtoken":"^9.0.0","konva":"^9.3.20","lorem-ipsum":"^2.0.8","mongoose":"^6.13.8","react-konva":"^19.0.3"},"devDependencies":{"nodemon":"^2.0.12"}}
+
+// FILE: populateTestData.js
+const mongoose = require("mongoose");
+const bcrypt = require("bcryptjs");
+const { LoremIpsum } = require("lorem-ipsum");
+const connectToMongo = require("./db"); 
+const User = require("./models/User");
+const Note = require("./models/Note");
+connectToMongo();
+const lorem = new LoremIpsum({
+  sentencesPerParagraph: { max: 8, min: 4 },
+  wordsPerSentence: { max: 16, min: 4 },
+});
+const noteTypes = [
+  "JavaScript",
+  "Salesforce",
+  "Sociology",
+  "Life",
+  "Technology",
+  "Creative",
+  "Tutorial",
+  "News",
+];
+const testUsers = [
+  {
+    name: "Admin User",
+    email: "admin@example.com",
+    password: "admin123",
+    country: "USA",
+    city: "New York",
+    about: "I am the admin.",
+    role: "admin",
+  },
+  {
+    name: "John Doe",
+    email: "john.doe@example.com",
+    password: "password123",
+    country: "Canada",
+    city: "Toronto",
+    about: "Just a regular user.",
+    role: "user",
+  },
+  {
+    name: "Jane Smith",
+    email: "jane.smith@example.com",
+    password: "password123",
+    country: "UK",
+    city: "London",
+    about: "Loves writing notes.",
+    role: "user",
+  },
+  {
+    name: "Alice Johnson",
+    email: "alice.j@example.com",
+    password: "password123",
+    country: "Australia",
+    city: "Sydney",
+    about: "Tech enthusiast.",
+    role: "user",
+  },
+  {
+    name: "Bob Brown",
+    email: "bob.brown@example.com",
+    password: "password123",
+    country: "Germany",
+    city: "Berlin",
+    about: "Creative writer.",
+    role: "user",
+  },
+];
+async function createTestUsers() {
+  try {
+    await User.deleteMany({}); 
+    const users = [];
+    for (const userData of testUsers) {
+      const salt = await bcrypt.genSalt(10);
+      const secPass = await bcrypt.hash(userData.password, salt);
+      const user = await User.create({
+        name: userData.name,
+        email: userData.email,
+        password: secPass,
+        country: userData.country,
+        city: userData.city,
+        about: userData.about,
+        role: userData.role,
+      });
+      users.push(user);
+      console.log(`Created user: ${user.name}`);
+    }
+    return users;
+  } catch (error) {
+    console.error("Error creating users:", error);
+    process.exit(1);
+  }
+}
+async function createTestNotes(users) {
+  try {
+    await Note.deleteMany({}); 
+    const notesCount = 100;
+    for (let i = 0; i < notesCount; i++) {
+      const user = users[Math.floor(Math.random() * users.length)]; 
+      const type = noteTypes[Math.floor(Math.random() * noteTypes.length)]; 
+      const title = lorem.generateWords(3); 
+      const description = lorem.generateParagraphs(2); 
+      const tag = lorem.generateWords(1); 
+      const isFeatured = user.role === "admin" && Math.random() < 0.2; 
+      const words = description.split(/\s+/).filter(Boolean).length;
+      const readTimeMinutes = Math.max(1, Math.ceil(words / 200));
+      const note = await Note.create({
+        user: user._id,
+        title: `${type} Note: ${title}`,
+        description,
+        tag,
+        type,
+        isFeatured,
+        readTimeMinutes,
+      });
+      console.log(`Created note ${i + 1}/${notesCount}: ${note.title}`);
+    }
+  } catch (error) {
+    console.error("Error creating notes:", error);
+    process.exit(1);
+  }
+}
+async function main() {
+  try {
+    const users = await createTestUsers();
+    await createTestNotes(users);
+    console.log("Test data population completed!");
+  } catch (error) {
+    console.error("Error in main:", error);
+  } finally {
+    mongoose.connection.close();
+    console.log("Database connection closed.");
+  }
+}
+main();
+
+// FILE: routes/auth.js
+const express = require("express");
+const User = require("../models/User");
+const router = express.Router();
+const { body, validationResult } = require("express-validator");
+const bcrypt = require("bcryptjs");
+var jwt = require("jsonwebtoken");
+var fetchuser = require("../middleware/fetchuser");
+const dotenv = require("dotenv");
+dotenv.config({ path: "../config.env" }); 
+const JWT_SECRET = process.env.JWT_SECRET;
+router.get("/", (req, res) => {
+  console.log(
+    "hello you have reached the offices of square root two technologies",
+  );
+});
+router.post(
+  "/createuser",
+  [
+    body("name", "Enter a valid name").isLength({ min: 3 }),
+    body("email", "Enter a valid email").isEmail(),
+    body("password", "Password must be atleast 5 characters").isLength({
+      min: 5,
+    }),
+    body("country", "Enter a valid country").isLength({ min: 2 }),
+    body("city", "Enter a valid city").isLength({ min: 1 }),
+    body("about"),
+    body("avatarUrl")
+      .optional({ checkFalsy: true })
+      .isURL()
+      .withMessage("Invalid Avatar URL"),
+  ],
+  async (req, res) => {
+    let success = false;
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ success, errors: errors.array() });
+    }
+    try {
+      let user = await User.findOne({ email: req.body.email });
+      if (user) {
+        return res.status(400).json({
+          success,
+          error: "Sorry a user with this email already exists",
+        });
+      }
+      const salt = await bcrypt.genSalt(10);
+      const secPass = await bcrypt.hash(req.body.password, salt);
+      const { name, email, password, country, city, about, avatarUrl } =
+        req.body;
+      user = await User.create({
+        name: name,
+        password: secPass,
+        email: email,
+        country: country,
+        city: city,
+        about: about,
+        avatarUrl: avatarUrl, 
+      });
+      const data = {
+        user: {
+          id: user.id,
+        },
+      };
+      const authtoken = jwt.sign(data, JWT_SECRET, { expiresIn: "1h" });
+      success = true;
+      res.json({ success, authtoken });
+    } catch (error) {
+      console.error(error.message);
+      res.status(500).send("Internal Server Error");
+    }
+  },
+);
+router.post(
+  "/login",
+  [
+    body("email", "Enter a valid email").isEmail(),
+    body("password", "Password cannot be blank").exists(),
+  ],
+  async (req, res) => {
+    let success = false;
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array() });
+    }
+    const { email, password } = req.body;
+    try {
+      let user = await User.findOne({ email });
+      if (!user) {
+        success = false;
+        return res
+          .status(400)
+          .json({ error: "Please try to login with correct credentials" });
+      }
+      const passwordCompare = await bcrypt.compare(password, user.password);
+      if (!passwordCompare) {
+        success = false;
+        return res.status(400).json({
+          success,
+          error: "Please try to login with correct credentials",
+        });
+      } else {
+        console.log("true!");
+      }
+      const data = {
+        user: {
+          id: user.id,
+        },
+      };
+      const authtoken = jwt.sign(data, JWT_SECRET, { expiresIn: "1h" });
+      success = true;
+      res.json({ success, authtoken });
+    } catch (error) {
+      console.error(error.message);
+      res.status(500).send("Internal Server Error");
+    }
+  },
+);
+router.post("/getuser", fetchuser, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const user = await User.findById(userId).select("-password "); 
+    if (!user) {
+      return res.status(404).send("User not found");
+    }
+    res.send(user); 
+  } catch (error) {
+    console.error(error.message); 
+    res.status(500).send("Internal Server Error");
+  }
+});
+router.put(
+  "/profile", 
+  fetchuser, 
+  [
+    body("name", "Name must be at least 3 characters")
+      .optional()
+      .isLength({ min: 3 }),
+    body("country", "Country must be at least 2 characters")
+      .optional()
+      .isLength({ min: 2 }),
+    body("city", "City must be at least 1 character")
+      .optional()
+      .isLength({ min: 1 }),
+    body("about", "About must be a string").optional().isString(),
+    body("avatarUrl", "Please provide a valid URL for the avatar")
+      .optional({ checkFalsy: true }) 
+      .isURL(),
+  ],
+  async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array() });
+    }
+    try {
+      const userId = req.user.id;
+      const { name, country, city, about, avatarUrl } = req.body;
+      const updatedFields = {};
+      if (name !== undefined) updatedFields.name = name;
+      if (country !== undefined) updatedFields.country = country;
+      if (city !== undefined) updatedFields.city = city;
+      if (about !== undefined) updatedFields.about = about;
+      if (avatarUrl !== undefined) updatedFields.avatarUrl = avatarUrl;
+      if (Object.keys(updatedFields).length === 0) {
+        return res.status(400).json({ error: "No update fields provided" });
+      }
+      const updatedUser = await User.findByIdAndUpdate(
+        userId, 
+        { $set: updatedFields }, 
+        { new: true }, 
+      ).select("-password"); 
+      if (!updatedUser) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      res.status(200).json({ success: true, user: updatedUser });
+    } catch (error) {
+      console.error("Error updating profile:", error.message);
+      res.status(500).send("Internal Server Error");
+    }
+  },
+);
+module.exports = router;
+
+// FILE: routes/notes.js
+const express = require("express");
+const router = express.Router();
+const fetchuser = require("../middleware/fetchuser");
+const User = require("../models/User");
+const Note = require("../models/Note");
+const { body, validationResult } = require("express-validator");
+const mongoose = require("mongoose");
+var restrictToOwnerOrAdmin = require("../middleware/restrictToOwnerOrAdmin");
+router.get("/fetchNotesIrrespective/:id", async (req, res) => {
+  try {
+    const id = req.params.id;
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ error: "Invalid Note ID format" });
+    }
+    const note = await Note.findById(id).populate(
+      "user",
+      "name avatarUrl _id role",
+    );
+    if (!note) {
+      return res.status(404).json({ error: "Note not found" });
+    }
+    res.status(200).json(note);
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+router.get("/fetchNotesIrrespective", async (req, res) => {
+  try {
+    const allNotes = await Note.find({})
+      .populate("user", "name avatarUrl")
+      .sort({ date: -1 });
+    res.status(200).json(allNotes);
+  } catch (err) {
+    console.log(err);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+router.get("/fetchallnotes", fetchuser, async (req, res) => {
+  try {
+    const requestingUser = await User.findById(req.user.id).select("role"); 
+    if (!requestingUser) {
+      return res.status(401).json({ error: "User not found or invalid token" });
+    }
+    let notes;
+    if (requestingUser.role === "admin") {
+      console.log(
+        "Fetching all notes for admin user:",
+        requestingUser.email || req.user.id,
+      );
+      notes = await Note.find({})
+        .populate("user", "name email avatarUrl")
+        .sort({ date: -1 });
+    } else {
+      console.log(
+        "Fetching notes for regular user:",
+        requestingUser.email || req.user.id,
+      );
+      notes = await Note.find({ user: req.user.id })
+        .populate("user", "name avatarUrl")
+        .sort({ date: -1 });
+    }
+    res.json(notes);
+  } catch (error) {
+    console.error("Error in /fetchallnotes:", error.message);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+router.get("/fetchNotesIrrespectiveByType/:type", async (req, res) => {
+  try {
+    const type = req.params.type;
+    let query = {};
+    if (type && type !== "all") {
+      const validTypes = Note.schema.path("type").enumValues;
+      if (validTypes.includes(type)) {
+        query.type = type;
+      } else {
+        console.warn(`Invalid type requested: ${type}`);
+        return res.status(200).json([]);
+      }
+    }
+    const notes = await Note.find(query)
+      .populate("user", "name avatarUrl")
+      .sort({ date: -1 });
+    res.status(200).json(notes);
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+router.post(
+  "/addnote",
+  fetchuser,
+  [
+    body("title", "Enter a valid title").isLength({ min: 3 }),
+    body("description", "description must be atleast 5 characters").isLength({
+      min: 5,
+    }),
+    body("type").isIn([
+      "JavaScript",
+      "Salesforce",
+      "Sociology",
+      "Life",
+      "Technology",
+      "Creative",
+      "Tutorial",
+      "News",
+    ]),
+    body("tag").optional(),
+    body("isFeatured").optional().isBoolean(),
+  ],
+  async (req, res) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({ errors: errors.array() });
+      }
+      const requestingUser = await User.findById(req.user.id).select(
+        "role email",
+      );
+      if (!requestingUser)
+        return res.status(401).send({ error: "User not found." });
+      const { title, description, tag, type } = req.body;
+      let isFeatured = req.body.isFeatured || false; 
+      if (isFeatured && requestingUser.role !== "admin") {
+        console.warn(
+          `User ${requestingUser.email} (role: ${requestingUser.role}) attempted to set isFeatured=true on add. Forcing to false.`,
+        );
+        isFeatured = false; 
+      }
+      const words = description.split(/\s+/).filter(Boolean).length; 
+      const wordsPerMinute = 200; 
+      const readTimeMinutes = Math.max(1, Math.ceil(words / wordsPerMinute)); 
+      const note = new Note({
+        title,
+        description,
+        tag,
+        type,
+        isFeatured, 
+        readTimeMinutes, 
+        user: req.user.id,
+      });
+      const savedNote = await note.save();
+      const populatedNote = await Note.findById(savedNote._id).populate(
+        "user",
+        "name avatarUrl", 
+      );
+      res.json(populatedNote);
+    } catch (error) {
+      console.error("Error in /addnote:", error.message);
+      res.status(500).send("Internal Server Error");
+    }
+  },
+);
+router.put(
+  "/updatenote/:id",
+  fetchuser,
+  restrictToOwnerOrAdmin, 
+  [
+    body("title", "Enter a valid title").optional().isLength({ min: 3 }),
+    body("description", "description must be atleast 5 characters")
+      .optional()
+      .isLength({ min: 5 }),
+    body("type")
+      .optional()
+      .isIn([
+        "JavaScript",
+        "Salesforce",
+        "Sociology",
+        "Life",
+        "Technology",
+        "Creative",
+        "Tutorial",
+        "News",
+      ]), 
+    body("tag").optional(),
+    body("isFeatured").optional().isBoolean(),
+  ],
+  async (req, res) => {
+    const { title, description, tag, type } = req.body;
+    let clientIsFeatured = req.body.isFeatured;
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({ errors: errors.array() });
+      }
+      const updateFields = {};
+      if (title !== undefined) updateFields.title = title;
+      if (description !== undefined) {
+        updateFields.description = description;
+        const words = description.split(/\s+/).filter(Boolean).length;
+        const wordsPerMinute = 200;
+        updateFields.readTimeMinutes = Math.max(
+          1,
+          Math.ceil(words / wordsPerMinute),
+        );
+      }
+      if (tag !== undefined) updateFields.tag = tag;
+      if (type !== undefined) updateFields.type = type;
+      if (
+        clientIsFeatured !== undefined &&
+        req.requestingUser.role === "admin"
+      ) {
+        updateFields.isFeatured = clientIsFeatured;
+      }
+      if (Object.keys(updateFields).length === 0) {
+        return res
+          .status(400)
+          .json({ error: "No valid fields provided for update" });
+      }
+      const updatedNote = await Note.findByIdAndUpdate(
+        req.params.id,
+        { $set: updateFields },
+        { new: true },
+      ).populate("user", "name avatarUrl");
+      res.json({ note: updatedNote });
+    } catch (error) {
+      console.error("Error in /updatenote:", error.message);
+      res.status(500).json({ error: "Internal Server Error" });
+    }
+  },
+);
+router.delete(
+  "/deletenote/:id",
+  fetchuser,
+  restrictToOwnerOrAdmin,
+  async (req, res) => {
+    try {
+      const deletedNote = await Note.findByIdAndDelete(req.params.id);
+      res.json({ success: true, note: deletedNote }); 
+    } catch (error) {
+      console.error("Error in /deletenote:", error.message);
+      res.status(500).json({ error: "Internal Server Error" });
+    }
+  },
+);
+router.get("/fetchNextNote", async (req, res) => {
+  try {
+    const { lastId, type } = req.query;
+    const limit = parseInt(req.query.limit) || 1; 
+    let query = {};
+    if (type && type !== "all") {
+      const validTypes = Note.schema.path("type").enumValues;
+      if (validTypes.includes(type)) query.type = type;
+    }
+    if (lastId) {
+      if (!mongoose.Types.ObjectId.isValid(lastId)) {
+        return res
+          .status(400)
+          .json({ success: false, error: "Invalid lastId format" });
+      }
+      query._id = { $lt: lastId };
+    }
+    const notes = await Note.find(query)
+      .sort({ _id: -1 }) 
+      .limit(limit)
+      .populate("user", "name avatarUrl"); 
+    const nextLastId = notes.length > 0 ? notes[notes.length - 1]._id : null; 
+    let hasMore = false;
+    if (nextLastId) {
+      const remainingCount = await Note.countDocuments({
+        ...query, 
+        _id: { $lt: nextLastId }, 
+      });
+      hasMore = remainingCount > 0;
+    }
+    console.log("fetchNextNote response:", {
+      inputLastId: lastId,
+      fetchedNoteIds: notes.map((n) => n._id),
+      outputNextLastId: nextLastId,
+      hasMore,
+    });
+    res.status(200).json({
+      success: true,
+      notes,
+      hasMore,
+      nextLastId, 
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, error: "Internal Server Error" });
+  }
+});
+router.get("/featured/batch", async (req, res) => {
+  try {
+    const { lastId } = req.query; 
+    const limit = parseInt(req.query.limit) || 5; 
+    let query = { isFeatured: true }; 
+    if (lastId) {
+      if (!mongoose.Types.ObjectId.isValid(lastId)) {
+        return res
+          .status(400)
+          .json({ success: false, error: "Invalid lastId format" });
+      }
+      query._id = { $lt: lastId };
+    }
+    const notes = await Note.find(query)
+      .sort({ _id: -1 }) 
+      .limit(limit)
+      .populate("user", "name avatarUrl");
+    const nextLastId = notes.length > 0 ? notes[notes.length - 1]._id : null;
+    let hasMore = false;
+    if (nextLastId) {
+      const remainingCount = await Note.countDocuments({
+        isFeatured: true, 
+        _id: { $lt: nextLastId },
+      });
+      hasMore = remainingCount > 0;
+    }
+    console.log("fetchFeatured/batch response:", {
+      inputLastId: lastId,
+      fetchedNoteIds: notes.map((n) => n._id),
+      outputNextLastId: nextLastId,
+      hasMore,
+    });
+    res.status(200).json({
+      success: true,
+      notes,
+      hasMore,
+      nextLastId,
+    });
+  } catch (err) {
+    console.error("Error fetching featured notes batch:", err);
+    res.status(500).json({ success: false, error: "Internal Server Error" });
+  }
+});
+router.get("/featured", async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 3; 
+    const featuredNotes = await Note.find({ isFeatured: true })
+      .populate("user", "name avatarUrl")
+      .sort({ date: -1 }) 
+      .limit(limit);
+    res.json({ success: true, notes: featuredNotes });
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).send("Internal Server Error");
+  }
+});
+router.get("/search", async (req, res) => {
+  try {
+    const searchQuery = req.query.query;
+    const limit = parseInt(req.query.limit) || 10; 
+    if (
+      !searchQuery ||
+      typeof searchQuery !== "string" ||
+      searchQuery.trim() === ""
+    ) {
+      return res.status(400).json({
+        success: false,
+        error:
+          "Search query parameter is required and must be a non-empty string.",
+      });
+    }
+    const notes = await Note.find({
+      $or: [
+        { title: { $regex: searchQuery, $options: "i" } },
+        { description: { $regex: searchQuery, $options: "i" } },
+        { tag: { $regex: searchQuery, $options: "i" } }, 
+      ],
+    })
+      .populate("user", "name avatarUrl") 
+      .sort({ date: -1 }) 
+      .limit(limit);
+    res.json({ success: true, notes: notes });
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).send("Internal Server Error");
+  }
+});
+router.get("/types", async (req, res) => {
+  try {
+    const types = await Note.distinct("type");
+    const validTypes = types.filter((type) => type);
+    res.json({ success: true, types: validTypes });
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).send("Internal Server Error");
+  }
+});
+router.get("/recent", async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 5; 
+    const recentNotes = await Note.find({})
+      .sort({ date: -1 }) 
+      .limit(limit)
+      .select("title _id date"); 
+    res.json({ success: true, notes: recentNotes });
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).send("Internal Server Error");
+  }
+});
+module.exports = router;

@@ -1,0 +1,908 @@
+{
+  "config.env": true,
+  "db.js": true,
+  "index.js": true,
+  "middleware": {
+    "fetchuser.js": true
+  },
+  "models": {
+    "Note.js": true,
+    "User.js": true
+  },
+  "package.json": true,
+  "routes": {
+    "auth.js": true,
+    "notes.js": true
+  }
+}
+
+// FILE: config.env
+DATABASE = mongodb+srv://tanvirraihanislam2020:HBvqo4zAq5WwUqCZ@website2025.vgtt4.mongodb.net/?retryWrites=true&w=majority&appName=Website2025
+
+// FILE: db.js
+const mongoose = require("mongoose");
+const dotenv = require("dotenv");
+dotenv.config({ path: "./config.env" });
+
+const mongoURI = process.env.DATABASE;
+mongoose.set("strictQuery", false);
+const connectToMongo = () => {
+  mongoose
+    .connect(mongoURI, () => {
+      //console.log(mongoURI);
+      console.log("Connected to Mongo Successfully");
+    })
+    .catch((err) => {
+      console.log("no connection");
+      console.log(err);
+    });
+};
+
+module.exports = connectToMongo;
+
+
+// FILE: index.js
+const connectToMongo = require("./db");
+const express = require("express");
+var cors = require("cors");
+connectToMongo();
+const app = express();
+const port = 5000;
+
+app.use(cors());
+app.use(express.json());
+
+// Available Routes
+app.use("/api/auth", require("./routes/auth"));
+app.use("/api/notes", require("./routes/notes"));
+
+app.listen(port, () => {
+  console.log(`squareroottwo backend listening at http://localhost:${port}`);
+});
+
+
+// FILE: index.js
+const connectToMongo = require("./db");
+const express = require("express");
+var cors = require("cors");
+connectToMongo();
+const app = express();
+const port = 5000;
+
+app.use(cors());
+app.use(express.json());
+
+// Available Routes
+app.use("/api/auth", require("./routes/auth"));
+app.use("/api/notes", require("./routes/notes"));
+
+app.listen(port, () => {
+  console.log(`squareroottwo backend listening at http://localhost:${port}`);
+});
+
+
+// FILE: middleware/fetchuser.js
+var jwt = require('jsonwebtoken');
+const JWT_SECRET = 'Harryisagoodb$oy';
+
+const fetchuser = (req, res, next) => {
+    // Get the user from the jwt token and add id to req object
+    const token = req.header('auth-token');
+    if (!token) {
+        res.status(401).send({ error: "Please authenticate using a valid token" })
+    }
+    try {
+        const data = jwt.verify(token, JWT_SECRET);
+        req.user = data.user;
+        next();
+    } catch (error) {
+        res.status(401).send({ error: "Please authenticate using a valid token" })
+    }
+
+}
+
+
+module.exports = fetchuser;
+
+// FILE: models/Note.js
+// models/Note.js
+const mongoose = require("mongoose");
+const { Schema } = mongoose;
+
+const NotesSchema = new Schema({
+  user: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "user",
+  },
+  title: {
+    type: String,
+    required: true,
+  },
+  description: {
+    type: String,
+    required: true,
+  },
+  tag: {
+    type: String,
+    default: "General",
+  },
+  type: {
+    type: String,
+    enum: [
+      "JavaScript",
+      "Salesforce",
+      "Sociology",
+      "Life",
+      "Technology",
+      "Creative",
+      "Tutorial",
+      "News",
+    ],
+    required: true,
+  },
+  date: {
+    type: Date,
+    default: Date.now,
+  },
+  // --- New Fields ---
+  imageUrl: {
+    type: String,
+    required: false,
+    default: null,
+  },
+  readTimeMinutes: {
+    type: Number,
+    required: false,
+  },
+  isFeatured: {
+    type: Boolean,
+    default: false,
+    index: true,
+  },
+});
+
+module.exports = mongoose.model("notes", NotesSchema);
+
+
+// FILE: models/User.js
+// models/User.js
+const mongoose = require("mongoose");
+const { Schema } = mongoose;
+
+const UserSchema = new Schema({
+  name: {
+    type: String,
+    required: true,
+  },
+  email: {
+    type: String,
+    required: true,
+    unique: true,
+  },
+  password: {
+    type: String,
+    required: true,
+  },
+  date: {
+    type: Date,
+    default: Date.now,
+  },
+  country: {
+    type: String,
+    required: false,
+  },
+  city: {
+    type: String,
+    required: false,
+  },
+  about: {
+    type: String,
+    required: false,
+    default: "about is empty",
+  },
+  avatarUrl: {
+    type: String,
+    required: false,
+    default: null,
+  },
+});
+const User = mongoose.model("user", UserSchema);
+module.exports = User;
+
+
+// FILE: package.json
+{
+  "name": "squareroorwo_backend",
+  "version": "1.0.0",
+  "description": "Square Root Two Technologies",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node index.js"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.0.3",
+    "express": "^4.17.1",
+    "express-validator": "^6.12.1",
+    "jsonwebtoken": "^9.0.0",
+    "mongoose": "^6.10.3"
+  },
+  "devDependencies": {
+    "nodemon": "^2.0.12"
+  }
+}
+
+
+// FILE: package.json
+{
+  "name": "squareroorwo_backend",
+  "version": "1.0.0",
+  "description": "Square Root Two Technologies",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node index.js"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.0.3",
+    "express": "^4.17.1",
+    "express-validator": "^6.12.1",
+    "jsonwebtoken": "^9.0.0",
+    "mongoose": "^6.10.3"
+  },
+  "devDependencies": {
+    "nodemon": "^2.0.12"
+  }
+}
+
+
+// FILE: routes/auth.js
+const express = require("express");
+const User = require("../models/User");
+const router = express.Router();
+const { body, validationResult } = require("express-validator");
+const bcrypt = require("bcryptjs");
+var jwt = require("jsonwebtoken");
+var fetchuser = require("../middleware/fetchuser");
+
+const JWT_SECRET = "Harryisagoodb$oy";
+
+//test
+router.get("/", (req, res) => {
+  console.log(
+    "hello you have reached the offices of square root two technologies",
+  );
+});
+
+// ROUTE 1: Create a User using: POST "/api/auth/createuser". No login required
+router.post(
+  "/createuser",
+  [
+    body("name", "Enter a valid name").isLength({ min: 3 }),
+    body("email", "Enter a valid email").isEmail(),
+    body("password", "Password must be atleast 5 characters").isLength({
+      min: 5,
+    }),
+    body("country", "Enter a valid country").isLength({ min: 2 }),
+    body("city", "Enter a valid city").isLength({ min: 1 }),
+    body("about"),
+    body("avatarUrl").optional().isURL().withMessage("Invalid Avatar URL"),
+  ],
+  async (req, res) => {
+    let success = false;
+    // If there are errors, return Bad request and the errors
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ success, errors: errors.array() });
+    }
+    try {
+      // Check whether the user with this email exists already
+      let user = await User.findOne({ email: req.body.email });
+      if (user) {
+        return res.status(400).json({
+          success,
+          error: "Sorry a user with this email already exists",
+        });
+      }
+      const salt = await bcrypt.genSalt(10);
+      const secPass = await bcrypt.hash(req.body.password, salt);
+
+      const { name, email, password, country, city, about, avatarUrl } =
+        req.body;
+
+      // Create a new user
+      user = await User.create({
+        name: name,
+        password: secPass,
+        email: email,
+        country: country,
+        city: city,
+        about: about,
+        avatarUrl: avatarUrl, // Add avatarUrl here
+      });
+      const data = {
+        user: {
+          id: user.id,
+        },
+      };
+      const authtoken = jwt.sign(data, JWT_SECRET);
+
+      // res.json(user)
+      success = true;
+      res.json({ success, authtoken });
+    } catch (error) {
+      console.error(error.message);
+      res.status(500).send("Internal Server Error");
+    }
+  },
+);
+
+// ROUTE 2: Authenticate a User using: POST "/api/auth/login". No login required
+router.post(
+  "/login",
+  [
+    body("email", "Enter a valid email").isEmail(),
+    body("password", "Password cannot be blank").exists(),
+  ],
+  async (req, res) => {
+    let success = false;
+    // If there are errors, return Bad request and the errors
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array() });
+    }
+
+    const { email, password } = req.body;
+    try {
+      let user = await User.findOne({ email });
+      if (!user) {
+        success = false;
+        return res
+          .status(400)
+          .json({ error: "Please try to login with correct credentials" });
+      }
+
+      const passwordCompare = await bcrypt.compare(password, user.password);
+      if (!passwordCompare) {
+        success = false;
+        return res.status(400).json({
+          success,
+          error: "Please try to login with correct credentials",
+        });
+      } else {
+        console.log("true!");
+      }
+
+      const data = {
+        user: {
+          id: user.id,
+        },
+      };
+      const authtoken = jwt.sign(data, JWT_SECRET);
+      success = true;
+      res.json({ success, authtoken });
+    } catch (error) {
+      console.error(error.message);
+      res.status(500).send("Internal Server Error");
+    }
+  },
+);
+
+// ROUTE 3: Get loggedin User Details using: POST "/api/auth/getuser". Login required
+router.post("/getuser", fetchuser, async (req, res) => {
+  try {
+    userId = req.user.id;
+    const user = await User.findById(userId).select("-password");
+    res.send(user);
+  } catch (error) {
+    console.error(error.message);
+    res.status(500).send("Internal Server Error");
+  }
+});
+
+router.put(
+  "/profile", // Using PUT method for update
+  fetchuser, // Apply middleware to identify the user
+  [
+    // Add validations for the fields that can be updated. Use .optional()
+    body("name", "Name must be at least 3 characters")
+      .optional()
+      .isLength({ min: 3 }),
+    body("country", "Country must be at least 2 characters")
+      .optional()
+      .isLength({ min: 2 }),
+    body("city", "City must be at least 1 character")
+      .optional()
+      .isLength({ min: 1 }),
+    body("about", "About must be a string").optional().isString(),
+    body("avatarUrl", "Please provide a valid URL for the avatar")
+      .optional({ checkFalsy: true }) // Allow empty string '' to potentially clear the URL
+      .isURL(),
+    // Do NOT allow updating email or password here. Create separate routes for those actions if needed.
+  ],
+  async (req, res) => {
+    // 1. Handle Validation Errors
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array() });
+    }
+
+    try {
+      // 2. Get User ID from middleware
+      const userId = req.user.id;
+
+      // 3. Construct Update Object with provided fields
+      const { name, country, city, about, avatarUrl } = req.body;
+      const updatedFields = {};
+
+      // Only add fields to the update object if they were provided in the request body
+      if (name !== undefined) updatedFields.name = name;
+      if (country !== undefined) updatedFields.country = country;
+      if (city !== undefined) updatedFields.city = city;
+      if (about !== undefined) updatedFields.about = about;
+      // Allow setting avatarUrl to null or empty string to remove it
+      if (avatarUrl !== undefined) updatedFields.avatarUrl = avatarUrl;
+
+      // Check if there's anything to update
+      if (Object.keys(updatedFields).length === 0) {
+        return res.status(400).json({ error: "No update fields provided" });
+      }
+
+      // 4. Find User and Update using findByIdAndUpdate
+      const updatedUser = await User.findByIdAndUpdate(
+        userId, // Find user by ID from token
+        { $set: updatedFields }, // Apply the updates
+        { new: true }, // Return the modified document instead of the original
+      ).select("-password"); // Exclude the password field from the result
+
+      // 5. Handle User Not Found (though unlikely if token is valid)
+      if (!updatedUser) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      // 6. Send Success Response
+      res.status(200).json({ success: true, user: updatedUser });
+    } catch (error) {
+      // 7. Handle Server Errors
+      console.error("Error updating profile:", error.message);
+      res.status(500).send("Internal Server Error");
+    }
+  },
+);
+
+module.exports = router;
+
+
+// FILE: routes/notes.js
+const express = require("express");
+const router = express.Router();
+const fetchuser = require("../middleware/fetchuser");
+const Note = require("../models/Note");
+const { body, validationResult } = require("express-validator");
+const { request } = require("express");
+const mongoose = require("mongoose");
+
+// routes/notes.js
+
+// ROUTE -1: get a note by its id (User Agnostic)
+router.get("/fetchNotesIrrespective/:id", async (req, res) => {
+  try {
+    const id = req.params.id;
+
+    // --- Input Validation ---
+    // Check if the provided ID is a valid MongoDB ObjectId format
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ error: "Invalid Note ID format" });
+    }
+    // --- End Validation ---
+
+    // Find the single note by its ID
+    const note = await Note.findById(id)
+      // Populate the 'user' field for this note
+      .populate("user", "name avatarUrl");
+
+    // Check if a note with the given ID was actually found
+    if (!note) {
+      return res.status(404).json({ error: "Note not found" });
+    }
+
+    // Send the populated note
+    res.status(200).json(note);
+  } catch (err) {
+    // Log the error
+    console.error(err.message);
+
+    // Catch potential errors during DB query (besides format checked above)
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+//ROUTE 0: Get all notes for blogspace without edit and delete option irrespective of user
+router.get("/fetchNotesIrrespective", async (req, res) => {
+  try {
+    // Fetch all notes, add population and sorting
+    const allNotes = await Note.find({})
+      .populate("user", "name avatarUrl") // Populate user fields
+      .sort({ date: -1 }); // Sort by newest first
+    res.status(200).json(allNotes);
+  } catch (err) {
+    console.log(err); // Log the error
+    res.status(500).json({ error: "Internal Server Error" }); // Send generic error
+  }
+});
+
+// routes/notes.js
+
+// ROUTE 1: Get All the Notes using: GET "/api/notes/fetchallnotes". Login required
+router.get("/fetchallnotes", fetchuser, async (req, res) => {
+  try {
+    // Find notes belonging to the logged-in user
+    const notes = await Note.find({ user: req.user.id })
+      // Populate the 'user' field, selecting only 'name' and 'avatarUrl'
+      .populate("user", "name avatarUrl")
+      // Sort the results by date in descending order (newest first)
+      .sort({ date: -1 });
+
+    // Send the populated and sorted notes as JSON response
+    res.json(notes);
+  } catch (error) {
+    // Log the error for server-side debugging
+    console.error(error.message);
+    // Send a generic 500 Internal Server Error response
+    res.status(500).send("Internal Server Error");
+  }
+});
+
+// routes/notes.js
+
+// ROUTE BY TYPE (User Agnostic)
+router.get("/fetchNotesIrrespectiveByType/:type", async (req, res) => {
+  try {
+    const type = req.params.type;
+    let query = {}; // Initialize an empty query object
+
+    // Build the query based on the type parameter
+    if (type && type !== "all") {
+      // Optional: Validate type against schema enum for robustness
+      const validTypes = Note.schema.path("type").enumValues;
+      if (validTypes.includes(type)) {
+        query.type = type;
+      } else {
+        // If type is invalid based on enum, return 400 or empty array
+        console.warn(`Invalid type requested: ${type}`);
+        // Option 1: Return bad request
+        // return res.status(400).json({ error: `Invalid type specified: ${type}` });
+        // Option 2: Return empty array (effectively finding nothing for this invalid type)
+        return res.status(200).json([]);
+      }
+    }
+    // If type is 'all' or not provided, query remains empty {}, matching all notes.
+
+    // Find notes matching the query
+    const notes = await Note.find(query)
+      // Populate the 'user' field for each note
+      .populate("user", "name avatarUrl")
+      // Sort the results by date in descending order
+      .sort({ date: -1 });
+
+    // Send the populated and sorted notes
+    res.status(200).json(notes);
+  } catch (err) {
+    // Log the error
+    console.error(err.message);
+    // Send a generic error response
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+// ROUTE 2: Add a new Note using: POST "/api/notes/addnote". Login required
+router.post(
+  "/addnote",
+  fetchuser,
+  [
+    body("title", "Enter a valid title").isLength({ min: 3 }),
+    body("description", "description must be atleast 5 characters").isLength({
+      min: 5,
+    }),
+    body("type").isIn([
+      "JavaScript",
+      "Salesforce",
+      "Sociology",
+      "Life",
+      "Technology",
+      "Creative",
+      "Tutorial",
+      "News",
+    ]), // Validate against enum
+    body("tag").optional(),
+    body("imageUrl").optional().isURL().withMessage("Invalid Image URL"), // Add validation
+    body("isFeatured").optional().isBoolean(), // Add validation
+  ],
+  async (req, res) => {
+    try {
+      // If there are errors, return Bad request and the errors
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({ errors: errors.array() });
+      }
+
+      const { title, description, tag, type, imageUrl, isFeatured } = req.body;
+
+      // Calculate read time (simple example)
+      const words = description.split(/\s+/).length; // Split by whitespace
+      const wordsPerMinute = 200; // Average reading speed
+      const readTimeMinutes = Math.ceil(words / wordsPerMinute);
+
+      const note = new Note({
+        title,
+        description,
+        tag,
+        type,
+        imageUrl, // Save new field
+        isFeatured, // Save new field
+        readTimeMinutes, // Save calculated field
+        user: req.user.id,
+      });
+      const savedNote = await note.save();
+
+      // Populate user info before sending back (optional, but good practice)
+      const populatedNote = await Note.findById(savedNote._id).populate(
+        "user",
+        "name avatarUrl",
+      );
+
+      res.json(populatedNote); // Send populated note back
+    } catch (error) {
+      console.error(error.message);
+      res.status(500).send("Internal Server Error");
+    }
+  },
+);
+
+// ROUTE 3: Update an existing Note using: PUT "/api/notes/updatenote". Login required
+router.put(
+  "/updatenote/:id",
+  fetchuser,
+  [
+    // Add validation for optional fields being updated
+    body("title", "Enter a valid title").optional().isLength({ min: 3 }),
+    body("description", "description must be atleast 5 characters")
+      .optional()
+      .isLength({ min: 5 }),
+    body("type")
+      .optional()
+      .isIn([
+        "JavaScript",
+        "Salesforce",
+        "Sociology",
+        "Life",
+        "Technology",
+        "Creative",
+        "Tutorial",
+        "News",
+      ]),
+    body("tag").optional(),
+    body("imageUrl").optional().isURL().withMessage("Invalid Image URL"),
+    body("isFeatured").optional().isBoolean(),
+  ],
+  async (req, res) => {
+    const { title, description, tag, type, imageUrl, isFeatured } = req.body;
+    try {
+      // If there are errors, return Bad request
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({ errors: errors.array() });
+      }
+
+      // Create a newNote object
+      const newNote = {};
+      if (title) {
+        newNote.title = title;
+      }
+      if (description) {
+        newNote.description = description;
+        // Recalculate read time if description changes
+        const words = description.split(/\s+/).length;
+        const wordsPerMinute = 200;
+        newNote.readTimeMinutes = Math.ceil(words / wordsPerMinute);
+      }
+      if (tag) {
+        newNote.tag = tag;
+      }
+      if (type) {
+        newNote.type = type;
+      }
+      if (imageUrl !== undefined) {
+        newNote.imageUrl = imageUrl;
+      } // Handle updating/removing image URL
+      if (isFeatured !== undefined) {
+        newNote.isFeatured = isFeatured;
+      } // Handle updating featured status
+
+      // Find the note to be updated and update it
+      let note = await Note.findById(req.params.id);
+      if (!note) {
+        return res.status(404).send("Not Found");
+      }
+      if (note.user.toString() !== req.user.id) {
+        return res.status(401).send("Not Allowed");
+      }
+
+      note = await Note.findByIdAndUpdate(
+        req.params.id,
+        { $set: newNote },
+        { new: true }, // Return the updated document
+      ).populate("user", "name avatarUrl"); // Populate user info
+
+      res.json({ note });
+    } catch (error) {
+      console.error(error.message);
+      res.status(500).send("Internal Server Error");
+    }
+  },
+);
+
+// ROUTE 4: Delete an existing Note using: DELETE "/api/notes/deletenote". Login required
+router.delete("/deletenote/:id", fetchuser, async (req, res) => {
+  try {
+    // Find the note to be delete and delete it
+    let note = await Note.findById(req.params.id);
+    if (!note) {
+      return res.status(404).send("Not Found");
+    }
+
+    // Allow deletion only if user owns this Note
+    if (note.user.toString() !== req.user.id) {
+      return res.status(401).send("Not Allowed");
+    }
+
+    note = await Note.findByIdAndDelete(req.params.id);
+    res.json({ Success: "Note has been deleted", note: note });
+  } catch (error) {
+    console.error(error.message);
+    res.status(500).send("Internal Server Error");
+  }
+});
+
+// Modify existing /fetchNextNote or create a new endpoint like /paginatedNotes
+// routes/notes.js
+
+router.get("/fetchNextNote", async (req, res) => {
+  try {
+    const { lastId, type } = req.query;
+    const limit = parseInt(req.query.limit) || 3;
+    let query = {};
+    if (type && type !== "all") {
+      const validTypes = Note.schema.path("type").enumValues;
+      if (validTypes.includes(type)) query.type = type;
+    }
+    if (lastId) {
+      if (!mongoose.Types.ObjectId.isValid(lastId)) {
+        return res
+          .status(400)
+          .json({ success: false, error: "Invalid lastId format" });
+      }
+      query._id = { $lt: lastId }; // Ensure this filters out already-fetched notes
+    }
+
+    const notes = await Note.find(query)
+      .sort({ _id: -1 }) // Descending order by _id
+      .limit(limit)
+      .populate("user", "name avatarUrl");
+
+    const nextLastId = notes.length > 0 ? notes[notes.length - 1]._id : lastId;
+    const totalRemaining = await Note.countDocuments({
+      ...query,
+      _id: { $lt: nextLastId },
+    });
+    const hasMore = totalRemaining > 0;
+
+    console.log("fetchNextNote response:", {
+      lastId,
+      notes: notes.map((n) => n._id),
+      nextLastId,
+      hasMore,
+      totalRemaining,
+    });
+
+    res.status(200).json({
+      success: true,
+      notes,
+      hasMore,
+      nextLastId,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, error: "Internal Server Error" });
+  }
+});
+
+router.get("/featured", async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 3; // Default limit
+    const featuredNotes = await Note.find({ isFeatured: true })
+      .populate("user", "name avatarUrl")
+      .sort({ date: -1 }) // Or a specific featured order field
+      .limit(limit);
+    res.json({ success: true, notes: featuredNotes });
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).send("Internal Server Error");
+  }
+});
+
+router.get("/search", async (req, res) => {
+  try {
+    const searchQuery = req.query.query;
+    const limit = parseInt(req.query.limit) || 10;
+
+    if (
+      !searchQuery ||
+      typeof searchQuery !== "string" ||
+      searchQuery.trim() === ""
+    ) {
+      return res.status(400).json({
+        success: false,
+        error:
+          "Search query parameter is required and must be a non-empty string.",
+      });
+    }
+
+    // Use $regex for basic search (case-insensitive)
+    // Consider MongoDB $text index for production performance
+    const notes = await Note.find({
+      $or: [
+        { title: { $regex: searchQuery, $options: "i" } },
+        { description: { $regex: searchQuery, $options: "i" } },
+        { tag: { $regex: searchQuery, $options: "i" } }, // Also search tags
+      ],
+    })
+      .populate("user", "name avatarUrl")
+      .sort({ date: -1 }) // Or sort by relevance if using $text index
+      .limit(limit);
+
+    res.json({ success: true, notes: notes });
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).send("Internal Server Error");
+  }
+});
+
+router.get("/types", async (req, res) => {
+  try {
+    // Get distinct types directly from the database
+    const types = await Note.distinct("type");
+    // Optionally filter out null/empty types if they exist
+    const validTypes = types.filter((type) => type);
+    res.json({ success: true, types: validTypes });
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).send("Internal Server Error");
+  }
+});
+
+router.get("/recent", async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 5; // Default limit
+    // Fetch recent notes, selecting only necessary fields for the sidebar link
+    const recentNotes = await Note.find({})
+      .sort({ date: -1 }) // Newest first
+      .limit(limit)
+      .select("title _id date"); // Select fields needed for links
+
+    res.json({ success: true, notes: recentNotes });
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).send("Internal Server Error");
+  }
+});
+
+module.exports = router;

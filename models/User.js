@@ -1,3 +1,4 @@
+// models/User.js
 const mongoose = require("mongoose");
 const { Schema } = mongoose;
 
@@ -31,6 +32,17 @@ const UserSchema = new Schema({
     type: String,
     required: false,
     default: "about is empty",
+  },
+  avatarUrl: {
+    type: String,
+    required: false,
+    default: null,
+  },
+  role: {
+    type: String,
+    required: true,
+    enum: ["user", "admin"], // Define possible roles
+    default: "user", // Default role for new users
   },
 });
 const User = mongoose.model("user", UserSchema);
