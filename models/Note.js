@@ -1,3 +1,4 @@
+// FILE: models/Note.js
 const mongoose = require("mongoose");
 const { Schema } = mongoose;
 
@@ -20,13 +21,30 @@ const NotesSchema = new Schema({
   },
   type: {
     type: String,
-    enum: ["JavaScript", "Salesforce", "Sociology", "Life"],
+    enum: [
+      "JavaScript",
+      "Salesforce",
+      "Sociology",
+      "Life",
+      "Technology",
+      "Creative",
+      "Tutorial",
+      "News",
+    ],
     required: true,
   },
-
   date: {
     type: Date,
     default: Date.now,
+  },
+  readTimeMinutes: {
+    type: Number,
+    required: false, // Keep this if you still calculate/use it
+  },
+  isFeatured: {
+    type: Boolean,
+    default: false,
+    index: true,
   },
 });
 

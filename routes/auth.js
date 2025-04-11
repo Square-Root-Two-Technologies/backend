@@ -6,12 +6,16 @@ const bcrypt = require("bcryptjs");
 var jwt = require("jsonwebtoken");
 var fetchuser = require("../middleware/fetchuser");
 
-const JWT_SECRET = "Harryisagoodb$oy";
+const dotenv = require("dotenv");
+dotenv.config({ path: "../config.env" }); // Add this at the top
+const JWT_SECRET = process.env.JWT_SECRET;
+
+//const JWT_SECRET = "Harryisagoodb$oy";
 
 //test
 router.get("/", (req, res) => {
   console.log(
-    "hello you have reached the offices of square root two technologies"
+    "hello you have reached the offices of square root two technologies",
   );
 });
 
@@ -27,6 +31,10 @@ router.post(
     body("country", "Enter a valid country").isLength({ min: 2 }),
     body("city", "Enter a valid city").isLength({ min: 1 }),
     body("about"),
+    body("avatarUrl")
+      .optional({ checkFalsy: true })
+      .isURL()
+      .withMessage("Invalid Avatar URL"),
   ],
   async (req, res) => {
     let success = false;
@@ -47,21 +55,25 @@ router.post(
       const salt = await bcrypt.genSalt(10);
       const secPass = await bcrypt.hash(req.body.password, salt);
 
+      const { name, email, password, country, city, about, avatarUrl } =
+        req.body;
+
       // Create a new user
       user = await User.create({
-        name: req.body.name,
+        name: name,
         password: secPass,
-        email: req.body.email,
-        country: req.body.country,
-        city: req.body.city,
-        about: req.body.about,
+        email: email,
+        country: country,
+        city: city,
+        about: about,
+        avatarUrl: avatarUrl, // Add avatarUrl here
       });
       const data = {
         user: {
           id: user.id,
         },
       };
-      const authtoken = jwt.sign(data, JWT_SECRET);
+      const authtoken = jwt.sign(data, JWT_SECRET, { expiresIn: "1h" });
 
       // res.json(user)
       success = true;
@@ -70,7 +82,7 @@ router.post(
       console.error(error.message);
       res.status(500).send("Internal Server Error");
     }
-  }
+  },
 );
 
 // ROUTE 2: Authenticate a User using: POST "/api/auth/login". No login required
@@ -114,25 +126,101 @@ router.post(
           id: user.id,
         },
       };
-      const authtoken = jwt.sign(data, JWT_SECRET);
+      const authtoken = jwt.sign(data, JWT_SECRET, { expiresIn: "1h" });
       success = true;
       res.json({ success, authtoken });
     } catch (error) {
       console.error(error.message);
       res.status(500).send("Internal Server Error");
     }
-  }
+  },
 );
 
 // ROUTE 3: Get loggedin User Details using: POST "/api/auth/getuser". Login required
 router.post("/getuser", fetchuser, async (req, res) => {
   try {
-    userId = req.user.id;
-    const user = await User.findById(userId).select("-password");
-    res.send(user);
+    const userId = req.user.id;
+    // CORRECT: Exclude both password and role
+    const user = await User.findById(userId).select("-password "); // <--- CHANGE THIS LINE
+
+    if (!user) {
+      return res.status(404).send("User not found");
+    }
+    res.send(user); // User object without password and role
   } catch (error) {
-    console.error(error.message);
+    console.error(error.message); // The error you saw was logged here
     res.status(500).send("Internal Server Error");
   }
 });
+
+router.put(
+  "/profile", // Using PUT method for update
+  fetchuser, // Apply middleware to identify the user
+  [
+    // Add validations for the fields that can be updated. Use .optional()
+    body("name", "Name must be at least 3 characters")
+      .optional()
+      .isLength({ min: 3 }),
+    body("country", "Country must be at least 2 characters")
+      .optional()
+      .isLength({ min: 2 }),
+    body("city", "City must be at least 1 character")
+      .optional()
+      .isLength({ min: 1 }),
+    body("about", "About must be a string").optional().isString(),
+    body("avatarUrl", "Please provide a valid URL for the avatar")
+      .optional({ checkFalsy: true }) // Allow empty string '' to potentially clear the URL
+      .isURL(),
+    // Do NOT allow updating email or password here. Create separate routes for those actions if needed.
+  ],
+  async (req, res) => {
+    // 1. Handle Validation Errors
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array() });
+    }
+
+    try {
+      // 2. Get User ID from middleware
+      const userId = req.user.id;
+
+      // 3. Construct Update Object with provided fields
+      const { name, country, city, about, avatarUrl } = req.body;
+      const updatedFields = {};
+
+      // Only add fields to the update object if they were provided in the request body
+      if (name !== undefined) updatedFields.name = name;
+      if (country !== undefined) updatedFields.country = country;
+      if (city !== undefined) updatedFields.city = city;
+      if (about !== undefined) updatedFields.about = about;
+      // Allow setting avatarUrl to null or empty string to remove it
+      if (avatarUrl !== undefined) updatedFields.avatarUrl = avatarUrl;
+
+      // Check if there's anything to update
+      if (Object.keys(updatedFields).length === 0) {
+        return res.status(400).json({ error: "No update fields provided" });
+      }
+
+      // 4. Find User and Update using findByIdAndUpdate
+      const updatedUser = await User.findByIdAndUpdate(
+        userId, // Find user by ID from token
+        { $set: updatedFields }, // Apply the updates
+        { new: true }, // Return the modified document instead of the original
+      ).select("-password"); // Exclude the password field from the result
+
+      // 5. Handle User Not Found (though unlikely if token is valid)
+      if (!updatedUser) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      // 6. Send Success Response
+      res.status(200).json({ success: true, user: updatedUser });
+    } catch (error) {
+      // 7. Handle Server Errors
+      console.error("Error updating profile:", error.message);
+      res.status(500).send("Internal Server Error");
+    }
+  },
+);
+
 module.exports = router;
