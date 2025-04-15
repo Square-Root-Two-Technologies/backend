@@ -29,16 +29,16 @@ jobs:
           node-version: lts/*
 
       - name: Install step
-        run: "npm install"
+        run: "yarn"
 
       - name: Build step
-        run: "npm run build"
+        run: "node index.js"
 
       - name: Upload to Deno Deploy
         uses: denoland/deployctl@v1
         with:
           project: "squareroottwobackend"
-          entrypoint: "https://deno.land/std@0.217.0/http/file_server.ts"
-          root: "build"
+          entrypoint: "index.js"
+          root: ""
           
           
