@@ -39,6 +39,6 @@ jobs:
         with:
           project: "squareroottwobackend"
           entrypoint: ""
-          root: "./"
+          root: ""
           
           
