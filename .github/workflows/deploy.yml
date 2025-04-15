@@ -37,8 +37,8 @@ jobs:
       - name: Upload to Deno Deploy
         uses: denoland/deployctl@v1
         with:
-          project: "squareroottwobackend"
-          entrypoint: ""
+          project: "root-2-backend-17"
+          entrypoint: "index.js"
           root: ""
           
           
