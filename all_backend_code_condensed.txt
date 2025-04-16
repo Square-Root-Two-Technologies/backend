@@ -1,5 +1,6 @@
 // --- File Structure ---
 {
+  "app.yaml": true,
   "db.js": true,
   "index.js": true,
   "middleware": {
@@ -19,6 +20,8 @@
 }
 
 // --- Aggregated Code Content (Comments and Blank Lines Removed) ---
+
+// FILE: app.yaml (Content Removed or Empty)
 
 // FILE: db.js
 const mongoose = require("mongoose");
@@ -193,7 +196,7 @@ const User = mongoose.model("user", UserSchema);
 module.exports = User;
 
 // FILE: package.json
-{"name":"squareroorwo_backend","version":"1.0.0","description":"Square Root Two Technologies","main":"index.js","scripts":{"test":"echo \"Error: no test specified\" && exit 1","start":"node index.js"},"author":"","license":"ISC","dependencies":{"bcryptjs":"^2.4.3","cors":"^2.8.5","dotenv":"^16.0.3","express":"^4.17.1","express-validator":"^6.12.1","jsonwebtoken":"^9.0.0","konva":"^9.3.20","lorem-ipsum":"^2.0.8","mongoose":"^6.13.8","react-konva":"^19.0.3"},"devDependencies":{"nodemon":"^2.0.12"}}
+{"name":"squareroorwo_backend","version":"1.0.0","description":"Square Root Two Technologies","main":"index.js","scripts":{"test":"echo \"Error: no test specified\" && exit 1","start":"node index.js"},"author":"","license":"ISC","dependencies":{"bcryptjs":"^2.4.3","cors":"^2.8.5","dotenv":"^16.0.3","express":"^4.17.1","express-validator":"^6.12.1","jsonwebtoken":"^9.0.0","lorem-ipsum":"^2.0.8","mongoose":"^6.13.8"},"devDependencies":{"nodemon":"^2.0.12"}}
 
 // FILE: populateTestData.js
 const mongoose = require("mongoose");

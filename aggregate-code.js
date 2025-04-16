@@ -11,7 +11,8 @@ const relevantExtensions = [
   ".js",
   ".ts",
   ".json", // For configs like package.json - consider if *all* JSONs are needed
-  ".env", // Be careful including .env files if they contain secrets!
+  ".env",
+  ".yaml", // Be careful including .env files if they contain secrets!
   // Add other extensions relevant to your specific backend if needed
 ];
 
