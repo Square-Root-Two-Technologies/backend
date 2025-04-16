@@ -1,6 +1,7 @@
 // --- File Structure ---
 {
   "app.yaml": true,
+  "config.env": true,
   "db.js": true,
   "index.js": true,
   "middleware": {
@@ -21,7 +22,22 @@
 
 // --- Aggregated Code Content (Comments and Blank Lines Removed) ---
 
-// FILE: app.yaml (Content Removed or Empty)
+// FILE: app.yaml
+runtime: nodejs
+env_variables:
+  DATABASE: "mongodb+srv://tanvirraihanislam2020:HBvqo4zAq5WwUqCZ@website2025.vgtt4.mongodb.net/?retryWrites=true&w=majority&appName=Website2025"
+  JWT_SECRET: "Harryisagoodb$oy"
+  PORT: "5000"
+handlers:
+  - url: /.*
+    script: auto
+network:
+  forwarded_ports:
+    - 5000
+
+// FILE: config.env
+DATABASE = mongodb+srv://tanvirraihanislam2020:HBvqo4zAq5WwUqCZ@website2025.vgtt4.mongodb.net/?retryWrites=true&w=majority&appName=Website2025
+JWT_SECRET = Harryisagoodb$oy
 
 // FILE: db.js
 const mongoose = require("mongoose");

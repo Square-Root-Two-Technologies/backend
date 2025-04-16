@@ -1,0 +1,11 @@
+runtime: nodejs
+env_variables:
+  DATABASE: "mongodb+srv://tanvirraihanislam2020:HBvqo4zAq5WwUqCZ@website2025.vgtt4.mongodb.net/?retryWrites=true&w=majority&appName=Website2025"
+  JWT_SECRET: "Harryisagoodb$oy"
+  PORT: "5000"
+handlers:
+  - url: /.*
+    script: auto
+network:
+  forwarded_ports:
+    - 5000
