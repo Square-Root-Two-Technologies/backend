@@ -15,3 +15,9 @@ app.use("/api/notes", require("./routes/notes"));
 app.listen(port, () => {
   console.log(`squareroottwo backend listening at http://localhost:${port}`);
 });
+
+//for basic ping
+app.get("/ping", (req, res) => {
+  console.log("Ping request received at:", new Date().toISOString()); // Optional: Log pings for verification
+  res.status(200).send("OK"); // Send a simple 200 OK response
+});

@@ -23,7 +23,7 @@
 // --- Aggregated Code Content (Comments and Blank Lines Removed) ---
 
 // FILE: app.yaml
-runtime: nodejs
+runtime: nodejs20
 env_variables:
   DATABASE: "mongodb+srv://tanvirraihanislam2020:HBvqo4zAq5WwUqCZ@website2025.vgtt4.mongodb.net/?retryWrites=true&w=majority&appName=Website2025"
   JWT_SECRET: "Harryisagoodb$oy"
