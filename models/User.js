@@ -33,11 +33,6 @@ const UserSchema = new Schema({
     required: false,
     default: "about is empty",
   },
-  avatarUrl: {
-    type: String,
-    required: false,
-    default: null,
-  },
   role: {
     type: String,
     required: true,

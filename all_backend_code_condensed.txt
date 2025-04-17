@@ -71,6 +71,10 @@ app.use("/api/notes", require("./routes/notes"));
 app.listen(port, () => {
   console.log(`squareroottwo backend listening at http://localhost:${port}`);
 });
+app.get("/ping", (req, res) => {
+  console.log("Ping request received at:", new Date().toISOString()); 
+  res.status(200).send("OK"); 
+});
 
 // FILE: middleware/fetchuser.js
 const jwt = require("jsonwebtoken");
@@ -195,11 +199,6 @@ const UserSchema = new Schema({
     type: String,
     required: false,
     default: "about is empty",
-  },
-  avatarUrl: {
-    type: String,
-    required: false,
-    default: null,
   },
   role: {
     type: String,
@@ -378,10 +377,6 @@ router.post(
     body("country", "Enter a valid country").isLength({ min: 2 }),
     body("city", "Enter a valid city").isLength({ min: 1 }),
     body("about"),
-    body("avatarUrl")
-      .optional({ checkFalsy: true })
-      .isURL()
-      .withMessage("Invalid Avatar URL"),
   ],
   async (req, res) => {
     let success = false;
@@ -399,8 +394,7 @@ router.post(
       }
       const salt = await bcrypt.genSalt(10);
       const secPass = await bcrypt.hash(req.body.password, salt);
-      const { name, email, password, country, city, about, avatarUrl } =
-        req.body;
+      const { name, email, password, country, city, about } = req.body;
       user = await User.create({
         name: name,
         password: secPass,
@@ -408,7 +402,6 @@ router.post(
         country: country,
         city: city,
         about: about,
-        avatarUrl: avatarUrl, 
       });
       const data = {
         user: {
@@ -496,9 +489,6 @@ router.put(
       .optional()
       .isLength({ min: 1 }),
     body("about", "About must be a string").optional().isString(),
-    body("avatarUrl", "Please provide a valid URL for the avatar")
-      .optional({ checkFalsy: true }) 
-      .isURL(),
   ],
   async (req, res) => {
     const errors = validationResult(req);
@@ -507,13 +497,12 @@ router.put(
     }
     try {
       const userId = req.user.id;
-      const { name, country, city, about, avatarUrl } = req.body;
+      const { name, country, city, about } = req.body;
       const updatedFields = {};
       if (name !== undefined) updatedFields.name = name;
       if (country !== undefined) updatedFields.country = country;
       if (city !== undefined) updatedFields.city = city;
       if (about !== undefined) updatedFields.about = about;
-      if (avatarUrl !== undefined) updatedFields.avatarUrl = avatarUrl;
       if (Object.keys(updatedFields).length === 0) {
         return res.status(400).json({ error: "No update fields provided" });
       }
@@ -549,10 +538,7 @@ router.get("/fetchNotesIrrespective/:id", async (req, res) => {
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({ error: "Invalid Note ID format" });
     }
-    const note = await Note.findById(id).populate(
-      "user",
-      "name avatarUrl _id role",
-    );
+    const note = await Note.findById(id).populate("user", "name  _id role");
     if (!note) {
       return res.status(404).json({ error: "Note not found" });
     }
@@ -565,7 +551,7 @@ router.get("/fetchNotesIrrespective/:id", async (req, res) => {
 router.get("/fetchNotesIrrespective", async (req, res) => {
   try {
     const allNotes = await Note.find({})
-      .populate("user", "name avatarUrl")
+      .populate("user", "name")
       .sort({ date: -1 });
     res.status(200).json(allNotes);
   } catch (err) {
@@ -586,7 +572,7 @@ router.get("/fetchallnotes", fetchuser, async (req, res) => {
         requestingUser.email || req.user.id,
       );
       notes = await Note.find({})
-        .populate("user", "name email avatarUrl")
+        .populate("user", "name email ")
         .sort({ date: -1 });
     } else {
       console.log(
@@ -594,7 +580,7 @@ router.get("/fetchallnotes", fetchuser, async (req, res) => {
         requestingUser.email || req.user.id,
       );
       notes = await Note.find({ user: req.user.id })
-        .populate("user", "name avatarUrl")
+        .populate("user", "name ")
         .sort({ date: -1 });
     }
     res.json(notes);
@@ -617,7 +603,7 @@ router.get("/fetchNotesIrrespectiveByType/:type", async (req, res) => {
       }
     }
     const notes = await Note.find(query)
-      .populate("user", "name avatarUrl")
+      .populate("user", "name ")
       .sort({ date: -1 });
     res.status(200).json(notes);
   } catch (err) {
@@ -680,7 +666,7 @@ router.post(
       const savedNote = await note.save();
       const populatedNote = await Note.findById(savedNote._id).populate(
         "user",
-        "name avatarUrl", 
+        "name ", 
       );
       res.json(populatedNote);
     } catch (error) {
@@ -749,7 +735,7 @@ router.put(
         req.params.id,
         { $set: updateFields },
         { new: true },
-      ).populate("user", "name avatarUrl");
+      ).populate("user", "name ");
       res.json({ note: updatedNote });
     } catch (error) {
       console.error("Error in /updatenote:", error.message);
@@ -791,7 +777,7 @@ router.get("/fetchNextNote", async (req, res) => {
     const notes = await Note.find(query)
       .sort({ _id: -1 }) 
       .limit(limit)
-      .populate("user", "name avatarUrl"); 
+      .populate("user", "name "); 
     const nextLastId = notes.length > 0 ? notes[notes.length - 1]._id : null; 
     let hasMore = false;
     if (nextLastId) {
@@ -834,7 +820,7 @@ router.get("/featured/batch", async (req, res) => {
     const notes = await Note.find(query)
       .sort({ _id: -1 }) 
       .limit(limit)
-      .populate("user", "name avatarUrl");
+      .populate("user", "name ");
     const nextLastId = notes.length > 0 ? notes[notes.length - 1]._id : null;
     let hasMore = false;
     if (nextLastId) {
@@ -865,7 +851,7 @@ router.get("/featured", async (req, res) => {
   try {
     const limit = parseInt(req.query.limit) || 3; 
     const featuredNotes = await Note.find({ isFeatured: true })
-      .populate("user", "name avatarUrl")
+      .populate("user", "name ")
       .sort({ date: -1 }) 
       .limit(limit);
     res.json({ success: true, notes: featuredNotes });
@@ -896,7 +882,7 @@ router.get("/search", async (req, res) => {
         { tag: { $regex: searchQuery, $options: "i" } }, 
       ],
     })
-      .populate("user", "name avatarUrl") 
+      .populate("user", "name ") 
       .sort({ date: -1 }) 
       .limit(limit);
     res.json({ success: true, notes: notes });

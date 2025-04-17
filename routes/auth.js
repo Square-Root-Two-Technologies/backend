@@ -31,10 +31,6 @@ router.post(
     body("country", "Enter a valid country").isLength({ min: 2 }),
     body("city", "Enter a valid city").isLength({ min: 1 }),
     body("about"),
-    body("avatarUrl")
-      .optional({ checkFalsy: true })
-      .isURL()
-      .withMessage("Invalid Avatar URL"),
   ],
   async (req, res) => {
     let success = false;
@@ -55,8 +51,7 @@ router.post(
       const salt = await bcrypt.genSalt(10);
       const secPass = await bcrypt.hash(req.body.password, salt);
 
-      const { name, email, password, country, city, about, avatarUrl } =
-        req.body;
+      const { name, email, password, country, city, about } = req.body;
 
       // Create a new user
       user = await User.create({
@@ -66,7 +61,6 @@ router.post(
         country: country,
         city: city,
         about: about,
-        avatarUrl: avatarUrl, // Add avatarUrl here
       });
       const data = {
         user: {
@@ -168,9 +162,6 @@ router.put(
       .optional()
       .isLength({ min: 1 }),
     body("about", "About must be a string").optional().isString(),
-    body("avatarUrl", "Please provide a valid URL for the avatar")
-      .optional({ checkFalsy: true }) // Allow empty string '' to potentially clear the URL
-      .isURL(),
     // Do NOT allow updating email or password here. Create separate routes for those actions if needed.
   ],
   async (req, res) => {
@@ -185,7 +176,7 @@ router.put(
       const userId = req.user.id;
 
       // 3. Construct Update Object with provided fields
-      const { name, country, city, about, avatarUrl } = req.body;
+      const { name, country, city, about } = req.body;
       const updatedFields = {};
 
       // Only add fields to the update object if they were provided in the request body
@@ -193,8 +184,6 @@ router.put(
       if (country !== undefined) updatedFields.country = country;
       if (city !== undefined) updatedFields.city = city;
       if (about !== undefined) updatedFields.about = about;
-      // Allow setting avatarUrl to null or empty string to remove it
-      if (avatarUrl !== undefined) updatedFields.avatarUrl = avatarUrl;
 
       // Check if there's anything to update
       if (Object.keys(updatedFields).length === 0) {

@@ -18,10 +18,7 @@ router.get("/fetchNotesIrrespective/:id", async (req, res) => {
       return res.status(400).json({ error: "Invalid Note ID format" });
     }
     // Populate user details, imageUrl won't be present on the note object itself
-    const note = await Note.findById(id).populate(
-      "user",
-      "name avatarUrl _id role",
-    );
+    const note = await Note.findById(id).populate("user", "name  _id role");
     if (!note) {
       return res.status(404).json({ error: "Note not found" });
     }
@@ -37,7 +34,7 @@ router.get("/fetchNotesIrrespective", async (req, res) => {
   // ... (no changes needed here)
   try {
     const allNotes = await Note.find({})
-      .populate("user", "name avatarUrl")
+      .populate("user", "name")
       .sort({ date: -1 });
     res.status(200).json(allNotes);
   } catch (err) {
@@ -60,7 +57,7 @@ router.get("/fetchallnotes", fetchuser, async (req, res) => {
         requestingUser.email || req.user.id,
       );
       notes = await Note.find({})
-        .populate("user", "name email avatarUrl")
+        .populate("user", "name email ")
         .sort({ date: -1 });
     } else {
       console.log(
@@ -68,7 +65,7 @@ router.get("/fetchallnotes", fetchuser, async (req, res) => {
         requestingUser.email || req.user.id,
       );
       notes = await Note.find({ user: req.user.id })
-        .populate("user", "name avatarUrl")
+        .populate("user", "name ")
         .sort({ date: -1 });
     }
     res.json(notes);
@@ -95,7 +92,7 @@ router.get("/fetchNotesIrrespectiveByType/:type", async (req, res) => {
       }
     }
     const notes = await Note.find(query)
-      .populate("user", "name avatarUrl")
+      .populate("user", "name ")
       .sort({ date: -1 });
     res.status(200).json(notes);
   } catch (err) {
@@ -171,7 +168,7 @@ router.post(
       // Populate user details for the response
       const populatedNote = await Note.findById(savedNote._id).populate(
         "user",
-        "name avatarUrl", // Populate needed fields
+        "name ", // Populate needed fields
       );
 
       res.json(populatedNote);
@@ -243,7 +240,7 @@ router.put(
         req.params.id,
         { $set: updateFields },
         { new: true },
-      ).populate("user", "name avatarUrl");
+      ).populate("user", "name ");
       res.json({ note: updatedNote });
     } catch (error) {
       console.error("Error in /updatenote:", error.message);
@@ -298,7 +295,7 @@ router.get("/fetchNextNote", async (req, res) => {
     const notes = await Note.find(query)
       .sort({ _id: -1 }) // Use _id for cursor pagination (descending)
       .limit(limit)
-      .populate("user", "name avatarUrl"); // Populate user details
+      .populate("user", "name "); // Populate user details
 
     // Determine the next lastId and if there are more notes
     const nextLastId = notes.length > 0 ? notes[notes.length - 1]._id : null; // Use null if no notes found
@@ -353,7 +350,7 @@ router.get("/featured/batch", async (req, res) => {
     const notes = await Note.find(query)
       .sort({ _id: -1 }) // Sort by _id descending for stable pagination
       .limit(limit)
-      .populate("user", "name avatarUrl");
+      .populate("user", "name ");
 
     const nextLastId = notes.length > 0 ? notes[notes.length - 1]._id : null;
 
@@ -392,7 +389,7 @@ router.get("/featured", async (req, res) => {
   try {
     const limit = parseInt(req.query.limit) || 3; // Default limit to 3
     const featuredNotes = await Note.find({ isFeatured: true })
-      .populate("user", "name avatarUrl")
+      .populate("user", "name ")
       .sort({ date: -1 }) // Sort by most recent date
       .limit(limit);
     res.json({ success: true, notes: featuredNotes });
@@ -429,7 +426,7 @@ router.get("/search", async (req, res) => {
         { tag: { $regex: searchQuery, $options: "i" } }, // Also search in tag
       ],
     })
-      .populate("user", "name avatarUrl") // Populate user info
+      .populate("user", "name ") // Populate user info
       .sort({ date: -1 }) // Sort by date descending
       .limit(limit);
 
