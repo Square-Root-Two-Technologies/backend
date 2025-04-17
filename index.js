@@ -17,7 +17,7 @@ app.listen(port, () => {
 });
 
 //for basic ping
-app.get("/ping", (req, res) => {
+app.get("/", (req, res) => {
   console.log("Ping request received at:", new Date().toISOString()); // Optional: Log pings for verification
   res.status(200).send("OK"); // Send a simple 200 OK response
 });
