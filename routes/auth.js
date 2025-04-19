@@ -7,6 +7,7 @@ var jwt = require("jsonwebtoken");
 var fetchuser = require("../middleware/fetchuser");
 const upload = require("../middleware/upload");
 const cloudinary = require("../config/cloudinary");
+const { OAuth2Client } = require("google-auth-library");
 
 const dotenv = require("dotenv");
 dotenv.config({ path: "../config.env" }); // Add this at the top
