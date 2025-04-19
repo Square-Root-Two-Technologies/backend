@@ -1,12 +1,16 @@
 // --- File Structure ---
 {
   "app.yaml": true,
+  "config": {
+    "cloudinary.js": true
+  },
   "config.env": true,
   "db.js": true,
   "index.js": true,
   "middleware": {
     "fetchuser.js": true,
-    "restrictToOwnerOrAdmin.js": true
+    "restrictToOwnerOrAdmin.js": true,
+    "upload.js": true
   },
   "models": {
     "Note.js": true,
@@ -38,6 +42,23 @@ network:
 // FILE: config.env
 DATABASE = mongodb+srv://tanvirraihanislam2020:HBvqo4zAq5WwUqCZ@website2025.vgtt4.mongodb.net/?retryWrites=true&w=majority&appName=Website2025
 JWT_SECRET = Harryisagoodb$oy
+
+CLOUDINARY_CLOUD_NAME=dp5bafsoz
+CLOUDINARY_API_KEY=618714485493137
+CLOUDINARY_API_SECRET=HNxI_x85m4Gu0-xYVaYo0DBv1qI
+
+// FILE: config/cloudinary.js
+const cloudinary = require("cloudinary").v2;
+const dotenv = require("dotenv");
+dotenv.config({ path: "./config.env" }); 
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+  secure: true, 
+});
+console.log("Cloudinary Configured:", !!process.env.CLOUDINARY_CLOUD_NAME); 
+module.exports = cloudinary;
 
 // FILE: db.js
 const mongoose = require("mongoose");
@@ -115,6 +136,25 @@ const restrictToOwnerOrAdmin = async (req, res, next) => {
   next();
 };
 module.exports = restrictToOwnerOrAdmin;
+
+// FILE: middleware/upload.js
+const multer = require("multer");
+const storage = multer.memoryStorage();
+const fileFilter = (req, file, cb) => {
+  if (file.mimetype.startsWith("image/")) {
+    cb(null, true); 
+  } else {
+    cb(new Error("Not an image! Please upload only images."), false); 
+  }
+};
+const upload = multer({
+  storage: storage,
+  fileFilter: fileFilter,
+  limits: {
+    fileSize: 5 * 1024 * 1024, 
+  },
+});
+module.exports = upload;
 
 // FILE: models/Note.js
 const mongoose = require("mongoose");
@@ -206,12 +246,20 @@ const UserSchema = new Schema({
     enum: ["user", "admin"], 
     default: "user", 
   },
+  profilePictureUrl: {
+    type: String,
+    default: null,
+  },
+  profilePicturePublicId: {
+    type: String,
+    default: null,
+  },
 });
 const User = mongoose.model("user", UserSchema);
 module.exports = User;
 
 // FILE: package.json
-{"name":"squareroorwo_backend","version":"1.0.0","description":"Square Root Two Technologies","main":"index.js","scripts":{"test":"echo \"Error: no test specified\" && exit 1","start":"node index.js"},"author":"","license":"ISC","dependencies":{"bcryptjs":"^2.4.3","cors":"^2.8.5","dotenv":"^16.0.3","express":"^4.17.1","express-validator":"^6.12.1","jsonwebtoken":"^9.0.0","lorem-ipsum":"^2.0.8","mongoose":"^6.13.8"},"devDependencies":{"nodemon":"^2.0.12"}}
+{"name":"squareroorwo_backend","version":"1.0.0","description":"Square Root Two Technologies","main":"index.js","scripts":{"test":"echo \"Error: no test specified\" && exit 1","start":"node index.js"},"author":"","license":"ISC","dependencies":{"bcryptjs":"^2.4.3","cloudinary":"^2.6.0","cors":"^2.8.5","dotenv":"^16.5.0","express":"^4.17.1","express-validator":"^6.12.1","jsonwebtoken":"^9.0.0","lorem-ipsum":"^2.0.8","mongoose":"^6.13.8","multer":"^1.4.5-lts.2"},"devDependencies":{"nodemon":"^2.0.12"}}
 
 // FILE: populateTestData.js
 const mongoose = require("mongoose");
@@ -358,6 +406,8 @@ const { body, validationResult } = require("express-validator");
 const bcrypt = require("bcryptjs");
 var jwt = require("jsonwebtoken");
 var fetchuser = require("../middleware/fetchuser");
+const upload = require("../middleware/upload");
+const cloudinary = require("../config/cloudinary");
 const dotenv = require("dotenv");
 dotenv.config({ path: "../config.env" }); 
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -518,6 +568,76 @@ router.put(
     } catch (error) {
       console.error("Error updating profile:", error.message);
       res.status(500).send("Internal Server Error");
+    }
+  },
+);
+router.put(
+  "/profile/picture",
+  fetchuser, 
+  upload.single("profilePic"), 
+  async (req, res) => {
+    try {
+      const userId = req.user.id;
+      if (!req.file) {
+        return res
+          .status(400)
+          .json({ success: false, error: "No image file uploaded." });
+      }
+      const user = await User.findById(userId);
+      if (!user) {
+        return res
+          .status(404)
+          .json({ success: false, error: "User not found." });
+      }
+      const uploadStream = cloudinary.uploader.upload_stream(
+        {
+          folder: `profile_pictures/${userId}`, 
+          public_id: `user_${userId}_avatar`, 
+          overwrite: true, 
+          format: "webp", 
+          transformation: [
+            { width: 200, height: 200, crop: "fill", gravity: "face" },
+          ],
+        },
+        async (error, result) => {
+          if (error) {
+            console.error("Cloudinary upload error:", error);
+            return res.status(500).json({
+              success: false,
+              error: "Failed to upload image to cloud.",
+            });
+          }
+          if (!result) {
+            console.error(
+              "Cloudinary upload error: No result object returned.",
+            );
+            return res.status(500).json({
+              success: false,
+              error: "Cloud upload failed unexpectedly.",
+            });
+          }
+          user.profilePictureUrl = result.secure_url;
+          user.profilePicturePublicId = result.public_id;
+          await user.save();
+          const updatedUserInfo = await User.findById(userId).select(
+            "-password",
+          );
+          res.status(200).json({ success: true, user: updatedUserInfo });
+        },
+      );
+      uploadStream.end(req.file.buffer);
+    } catch (error) {
+      console.error("Error in /profile/picture:", error);
+      if (error instanceof multer.MulterError) {
+        return res.status(400).json({
+          success: false,
+          error: `File upload error: ${error.message}`,
+        });
+      }
+      if (error.message === "Not an image! Please upload only images.") {
+        return res.status(400).json({ success: false, error: error.message });
+      }
+      res.status(500).json({ success: false, error: "Internal Server Error" });
     }
   },
 );

@@ -39,6 +39,14 @@ const UserSchema = new Schema({
     enum: ["user", "admin"], // Define possible roles
     default: "user", // Default role for new users
   },
+  profilePictureUrl: {
+    type: String,
+    default: null,
+  },
+  profilePicturePublicId: {
+    type: String,
+    default: null,
+  },
 });
 const User = mongoose.model("user", UserSchema);
 module.exports = User;

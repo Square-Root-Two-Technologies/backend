@@ -5,6 +5,8 @@ const { body, validationResult } = require("express-validator");
 const bcrypt = require("bcryptjs");
 var jwt = require("jsonwebtoken");
 var fetchuser = require("../middleware/fetchuser");
+const upload = require("../middleware/upload");
+const cloudinary = require("../config/cloudinary");
 
 const dotenv = require("dotenv");
 dotenv.config({ path: "../config.env" }); // Add this at the top
@@ -208,6 +210,107 @@ router.put(
       // 7. Handle Server Errors
       console.error("Error updating profile:", error.message);
       res.status(500).send("Internal Server Error");
+    }
+  },
+);
+
+// --- New Endpoint for Profile Picture Upload ---
+router.put(
+  "/profile/picture",
+  fetchuser, // Ensure user is logged in
+  upload.single("profilePic"), // Use multer for single file upload named 'profilePic'
+  async (req, res) => {
+    try {
+      const userId = req.user.id;
+
+      // 1. Check if file exists
+      if (!req.file) {
+        return res
+          .status(400)
+          .json({ success: false, error: "No image file uploaded." });
+      }
+
+      // 2. Find the user to get the old public_id (if exists)
+      const user = await User.findById(userId);
+      if (!user) {
+        return res
+          .status(404)
+          .json({ success: false, error: "User not found." });
+      }
+
+      // 3. Upload to Cloudinary using upload_stream
+      const uploadStream = cloudinary.uploader.upload_stream(
+        {
+          folder: `profile_pictures/${userId}`, // Optional: Organize uploads
+          public_id: `user_${userId}_avatar`, // Consistent public_id for easy replacement
+          overwrite: true, // Overwrite if public_id already exists
+          format: "webp", // Convert to webp for optimization
+          transformation: [
+            // Optional: Resize image
+            { width: 200, height: 200, crop: "fill", gravity: "face" },
+          ],
+        },
+        async (error, result) => {
+          if (error) {
+            console.error("Cloudinary upload error:", error);
+            return res.status(500).json({
+              success: false,
+              error: "Failed to upload image to cloud.",
+            });
+          }
+
+          if (!result) {
+            console.error(
+              "Cloudinary upload error: No result object returned.",
+            );
+            return res.status(500).json({
+              success: false,
+              error: "Cloud upload failed unexpectedly.",
+            });
+          }
+
+          // 4. (Optional but recommended) Delete old image if it existed and ID is different
+          //    Note: With overwrite: true and consistent public_id, this might be redundant,
+          //    but good practice if public_id strategy changes.
+          // if (user.profilePicturePublicId && user.profilePicturePublicId !== result.public_id) {
+          //     try {
+          //         await cloudinary.uploader.destroy(user.profilePicturePublicId);
+          //         console.log("Deleted old profile pic:", user.profilePicturePublicId);
+          //     } catch (deleteError) {
+          //         console.error("Failed to delete old Cloudinary image:", deleteError);
+          //         // Don't block update if deletion fails, just log it
+          //     }
+          // }
+
+          // 5. Update User document in MongoDB
+          user.profilePictureUrl = result.secure_url;
+          user.profilePicturePublicId = result.public_id;
+          await user.save();
+
+          // 6. Return updated user info (excluding password)
+          const updatedUserInfo = await User.findById(userId).select(
+            "-password",
+          );
+          res.status(200).json({ success: true, user: updatedUserInfo });
+        },
+      );
+
+      // Pipe the buffer from multer into the Cloudinary upload stream
+      uploadStream.end(req.file.buffer);
+    } catch (error) {
+      console.error("Error in /profile/picture:", error);
+      // Handle specific multer errors (like file size)
+      if (error instanceof multer.MulterError) {
+        return res.status(400).json({
+          success: false,
+          error: `File upload error: ${error.message}`,
+        });
+      }
+      // Handle custom file filter error
+      if (error.message === "Not an image! Please upload only images.") {
+        return res.status(400).json({ success: false, error: error.message });
+      }
+      res.status(500).json({ success: false, error: "Internal Server Error" });
     }
   },
 );
