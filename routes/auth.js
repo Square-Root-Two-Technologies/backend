@@ -11,8 +11,12 @@ const cloudinary = require("../config/cloudinary");
 const dotenv = require("dotenv");
 dotenv.config({ path: "../config.env" }); // Add this at the top
 const JWT_SECRET = process.env.JWT_SECRET;
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID; // Get Google Client ID from env
 
-//const JWT_SECRET = "Harryisagoodb$oy";
+if (!GOOGLE_CLIENT_ID) {
+  console.error("FATAL ERROR: GOOGLE_CLIENT_ID is not defined in config.env");
+}
+const client = new OAuth2Client(GOOGLE_CLIENT_ID); // Initialize Google client
 
 //test
 router.get("/", (req, res) => {
@@ -314,5 +318,130 @@ router.put(
     }
   },
 );
+
+// --- NEW Google Login Endpoint ---
+router.post("/google-login", async (req, res) => {
+  const { token } = req.body; // Expecting the ID token from the frontend
+
+  if (!token) {
+    return res
+      .status(400)
+      .json({ success: false, error: "ID token is required." });
+  }
+  if (!GOOGLE_CLIENT_ID) {
+    console.error("Google Client ID is missing in backend config.");
+    return res
+      .status(500)
+      .json({ success: false, error: "Server configuration error." });
+  }
+
+  try {
+    // Verify the ID token using Google's library
+    const ticket = await client.verifyIdToken({
+      idToken: token,
+      audience: GOOGLE_CLIENT_ID, // Specify the CLIENT_ID of the app that accesses the backend
+    });
+    const payload = ticket.getPayload();
+
+    if (!payload) {
+      throw new Error("Invalid Google token payload");
+    }
+
+    const googleUserId = payload["sub"]; // Unique Google User ID
+    const email = payload["email"];
+    const name = payload["name"];
+    const picture = payload["picture"]; // Profile picture URL
+
+    if (!email) {
+      throw new Error("Email not found in Google token payload");
+    }
+
+    // Check if user already exists
+    let user = await User.findOne({ email: email });
+
+    if (user) {
+      // User exists, log them in
+      // Optionally update name/picture if different, or add googleId if missing
+      let needsSave = false;
+      if (!user.googleId) {
+        // Link the Google ID if logging in via Google for the first time
+        user.googleId = googleUserId;
+        needsSave = true;
+      }
+      // Optionally update profile picture if missing or different
+      if (
+        picture &&
+        (!user.profilePictureUrl || user.profilePictureUrl !== picture)
+      ) {
+        // Note: This just saves the URL from Google.
+        // If you want to re-upload to Cloudinary, add that logic here.
+        user.profilePictureUrl = picture;
+        // We don't get a publicId from Google, so maybe clear the old one?
+        // user.profilePicturePublicId = null;
+        needsSave = true;
+      }
+      // Optionally update name if missing or different
+      if (name && user.name !== name) {
+        user.name = name;
+        needsSave = true;
+      }
+
+      if (needsSave) {
+        await user.save();
+        console.log(`Updated existing user ${email} during Google login.`);
+      }
+
+      console.log(`Existing user ${email} logged in via Google.`);
+    } else {
+      // User does not exist, create a new one
+      // Password is not required because googleId will be set
+      user = new User({
+        googleId: googleUserId,
+        email: email,
+        name: name,
+        profilePictureUrl: picture, // Save Google's picture URL
+        // Set default country/city or leave them null/undefined?
+        // country: 'Unknown',
+        // city: 'Unknown',
+        // about: 'Signed up via Google', // Optional default 'about'
+        role: "user", // Default role
+      });
+      await user.save();
+      console.log(`New user ${email} created via Google Sign-In.`);
+    }
+
+    // Generate JWT token for the user (whether existing or new)
+    const jwtPayload = {
+      user: {
+        id: user.id,
+      },
+    };
+    const authtoken = jwt.sign(jwtPayload, JWT_SECRET, { expiresIn: "1h" });
+
+    res.json({ success: true, authtoken });
+  } catch (error) {
+    console.error("Google login verification error:", error);
+    // Provide a more specific error if possible
+    if (
+      error.message.includes("Invalid token signature") ||
+      error.message.includes("Token used too late") ||
+      error.message.includes("Invalid Google token payload")
+    ) {
+      res
+        .status(401)
+        .json({ success: false, error: "Invalid or expired Google token." });
+    } else if (error.message.includes("Email not found")) {
+      res.status(400).json({
+        success: false,
+        error: "Could not retrieve email from Google token.",
+      });
+    } else {
+      res.status(500).json({
+        success: false,
+        error: "Internal server error during Google authentication.",
+      });
+    }
+  }
+});
 
 module.exports = router;
