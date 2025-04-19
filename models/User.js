@@ -11,10 +11,15 @@ const UserSchema = new Schema({
     type: String,
     required: true,
     unique: true,
+    lowercase: true, // Ensure email is stored consistently
+    trim: true,
   },
   password: {
     type: String,
-    required: true,
+    required: function () {
+      return !this.googleId;
+    },
+    select: false,
   },
   date: {
     type: Date,
@@ -47,6 +52,19 @@ const UserSchema = new Schema({
     type: String,
     default: null,
   },
+  googleId: {
+    type: String,
+    unique: true, // Ensure only one user per Google ID
+    sparse: true, // Allows multiple documents to have null/no value for this field
+    default: null,
+  },
 });
+
+UserSchema.methods.toJSON = function () {
+  var obj = this.toObject();
+  delete obj.password;
+  return obj;
+};
+
 const User = mongoose.model("user", UserSchema);
 module.exports = User;
