@@ -4,6 +4,7 @@ const router = express.Router();
 const fetchuser = require("../middleware/fetchuser");
 const User = require("../models/User");
 const Note = require("../models/Note");
+const Category = require("../models/Category");
 const { body, validationResult } = require("express-validator");
 const mongoose = require("mongoose");
 var restrictToOwnerOrAdmin = require("../middleware/restrictToOwnerOrAdmin");
@@ -19,7 +20,9 @@ router.get("/fetchNotesIrrespective/:id", async (req, res) => {
       return res.status(400).json({ error: "Invalid Note ID format" });
     }
     // Populate user details, imageUrl won't be present on the note object itself
-    const note = await Note.findById(id).populate("user", "name  _id role");
+    const note = await Note.findById(id)
+      .populate("user", "name  _id role profilePictureUrl")
+      .populate("category", "name");
     if (!note) {
       return res.status(404).json({ error: "Note not found" });
     }
@@ -34,18 +37,28 @@ router.get("/fetchNotesIrrespective/:id", async (req, res) => {
 router.get("/fetchNoteBySlug/:slug", async (req, res) => {
   try {
     const slug = req.params.slug;
-    // Find the note by the unique slug field
-    const note = await Note.findOne({ slug: slug }).populate(
-      "user",
-      "name _id role profilePictureUrl",
-    ); // Populate user details
+
+    const note = await Note.findOne({ slug: slug })
+      .populate("user", "name _id role profilePictureUrl") // Keep user population
+      .populate("category", "name parent _id"); // Populate category with _id and parent
 
     if (!note) {
       console.warn(`Note not found with slug: ${slug}`);
-      return res.status(404).json({ error: "Note not found" }); // Use generic error for public
+      return res.status(404).json({ error: "Note not found" });
     }
+
+    let ancestorPath = [];
+    if (note.category && note.category._id) {
+      // Fetch ancestors using the helper function
+      ancestorPath = await getCategoryAncestors(note.category._id);
+    }
+
+    // Convert note to object to add the ancestor path
+    const noteObject = note.toObject();
+    noteObject.ancestorPath = ancestorPath; // Add the path to the response
+
     console.log(`Note found by slug ${slug}: ${note.title}`);
-    res.status(200).json(note);
+    res.status(200).json(noteObject); // Send the modified object
   } catch (err) {
     console.error("Error fetching note by slug:", err.message);
     if (err instanceof mongoose.Error.CastError) {
@@ -55,12 +68,42 @@ router.get("/fetchNoteBySlug/:slug", async (req, res) => {
   }
 });
 
+// --- Helper function to get ancestors ---
+async function getCategoryAncestors(categoryId) {
+  if (!categoryId || !mongoose.Types.ObjectId.isValid(categoryId)) {
+    return [];
+  }
+  let ancestors = [];
+  let currentId = categoryId;
+
+  try {
+    while (currentId) {
+      // Find category, select only needed fields, use lean for performance
+      const category = await Category.findById(currentId)
+        .select("_id name parent")
+        .lean();
+      if (!category) {
+        break; // Stop if category not found
+      }
+      // Add to the beginning of the array for correct order (root first)
+      ancestors.unshift({ _id: category._id, name: category.name });
+      currentId = category.parent; // Move up to the parent
+    }
+  } catch (err) {
+    console.error("Error fetching ancestors for category", categoryId, err);
+    // Return potentially partial path or empty on error
+    return ancestors;
+  }
+  return ancestors;
+}
+
 // GET all notes irrespective of user
 router.get("/fetchNotesIrrespective", async (req, res) => {
   // ... (no changes needed here)
   try {
     const allNotes = await Note.find({})
       .populate("user", "name")
+      .populate("category", "name")
       .sort({ date: -1 });
     res.status(200).json(allNotes);
   } catch (err) {
@@ -77,21 +120,23 @@ router.get("/fetchallnotes", fetchuser, async (req, res) => {
       return res.status(401).json({ error: "User not found or invalid token" });
     }
     let notes;
+    const populateFields = [
+      { path: "user", select: "name email profilePictureUrl" },
+      { path: "category", select: "name" },
+    ];
     if (requestingUser.role === "admin") {
       console.log(
         "Fetching all notes for admin user:",
         requestingUser.email || req.user.id,
       );
-      notes = await Note.find({})
-        .populate("user", "name email ")
-        .sort({ date: -1 });
+      notes = await Note.find({}).populate(populateFields).sort({ date: -1 });
     } else {
       console.log(
         "Fetching notes for regular user:",
         requestingUser.email || req.user.id,
       );
       notes = await Note.find({ user: req.user.id })
-        .populate("user", "name ")
+        .populate(populateFields)
         .sort({ date: -1 });
     }
     res.json(notes);
@@ -130,156 +175,121 @@ router.get("/fetchNotesIrrespectiveByType/:type", async (req, res) => {
 // POST Add a new Note using: POST "/api/notes/addnote". Login required
 router.post(
   "/addnote",
-  fetchuser, // Middleware to authenticate user and get req.user.id
+  fetchuser,
   [
-    // Validation middleware array
-    // Validate title: required, minimum 3 characters
-    body("title", "Enter a valid title").isLength({ min: 3 }),
-
-    // Validate description: required, minimum 5 characters
-    body("description", "description must be atleast 5 characters").isLength({
+    body("title", "Enter a valid title").trim().isLength({ min: 3 }),
+    body("description", "Description must be atleast 5 characters").isLength({
       min: 5,
     }),
-
-    // Validate type: required, must be one of the allowed enum values from the Note model
-    body("type")
-      .isIn([
-        // *** THIS IS THE CORRECTED LIST ***
-        "JavaScript",
-        "Salesforce",
-        "Sociology",
-        "Life",
-        "Technology",
-        "Creative",
-        "Tutorial",
-        "News",
-      ])
-      .withMessage("Invalid note type selected."), // Optional: specific error message
-
-    // Validate tag: optional string
-    body("tag").optional().isString(),
-
-    // Validate isFeatured: optional boolean
+    // --- REMOVED 'type' validation ---
+    // body("type").isIn([ /* old enum values */ ]).withMessage("Invalid note type selected."),
+    // --- ADDED 'category' validation ---
+    body("category", "Category is required")
+      .isMongoId()
+      .withMessage("Invalid Category ID format."),
+    body("tag").optional().trim().isString(),
     body("isFeatured").optional().isBoolean(),
   ],
   async (req, res) => {
-    try {
-      // Check for validation errors
-      const errors = validationResult(req);
-      if (!errors.isEmpty()) {
-        // Log validation errors for easier debugging on the server
-        console.error(
-          "Validation errors in /addnote:",
-          JSON.stringify(errors.array()),
-        );
-        return res.status(400).json({ errors: errors.array() });
-      }
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      console.error(
+        "Validation errors in /addnote:",
+        JSON.stringify(errors.array()),
+      );
+      return res.status(400).json({ success: false, errors: errors.array() });
+    }
 
-      // Fetch the requesting user's details (role needed for isFeatured logic)
+    try {
       const requestingUser = await User.findById(req.user.id).select(
-        "role email", // Select only necessary fields
+        "role email",
       );
       if (!requestingUser) {
-        // This case should ideally be caught by fetchuser, but good to double-check
         return res
           .status(401)
-          .send({ error: "User not found or invalid token." });
+          .json({ success: false, error: "User not found or invalid token." });
       }
 
-      // Destructure data from the request body
-      const { title, description, tag, type } = req.body;
-      let isFeatured = req.body.isFeatured || false; // Default isFeatured to false if not provided
+      const { title, description, tag, category: categoryId } = req.body; // Get category ID
+      let isFeatured = req.body.isFeatured || false;
 
-      // Security Check: Only allow admins to set isFeatured to true
+      // Check if category exists
+      const categoryExists = await Category.findById(categoryId);
+      if (!categoryExists) {
+        return res.status(400).json({
+          success: false,
+          errors: [
+            { msg: "Selected category does not exist", param: "category" },
+          ],
+        });
+      }
+
+      // Admin check for isFeatured
       if (isFeatured && requestingUser.role !== "admin") {
         console.warn(
           `User ${requestingUser.email || req.user.id} (role: ${
             requestingUser.role
           }) attempted to set isFeatured=true on add. Forcing to false.`,
         );
-        isFeatured = false; // Override if a non-admin tries to set it
+        isFeatured = false;
       }
 
-      // --- Slug Generation ---
-      // Generate a base slug from the title
+      // --- Slug Generation Logic (same as before) ---
       let baseSlug = slugify(title, {
-        lower: true, // convert to lower case
-        strict: true, // strip special characters except -
-        remove: /[*+~.()'"!:@]/g, // remove specified characters
+        lower: true,
+        strict: true,
+        remove: /[*+~.()'"!:@]/g,
       });
-
-      // Handle empty or invalid slugs (e.g., title was only symbols)
       if (!baseSlug) {
-        baseSlug = `note-${Date.now()}`; // Fallback slug
+        baseSlug = `note-${Date.now()}`;
       }
-
       let slug = baseSlug;
       let counter = 1;
-      let existingNote = await Note.findOne({ slug: slug }); // Check if slug already exists
-
-      // Handle slug collisions by appending a counter
+      let existingNote = await Note.findOne({ slug: slug });
       while (existingNote) {
         counter++;
         slug = `${baseSlug}-${counter}`;
         console.log(
           `Slug collision detected for '${baseSlug}'. Trying new slug: ${slug}`,
         );
-        existingNote = await Note.findOne({ slug: slug }); // Check again with the new slug
+        existingNote = await Note.findOne({ slug: slug });
       }
       console.log(`Final generated slug for note '${title}': ${slug}`);
-      // --- End Slug Generation ---
 
-      // --- Read Time Calculation ---
-      // Simple word count based estimation
-      const words = description.split(/\s+/).filter(Boolean).length; // Split by whitespace, remove empty strings
-      const wordsPerMinute = 200; // Average reading speed
-      const readTimeMinutes = Math.max(1, Math.ceil(words / wordsPerMinute)); // Ensure at least 1 min
-      // --- End Read Time Calculation ---
-
-      // Create a new Note instance using the Mongoose model
       const note = new Note({
         title,
-        slug, // Use the generated unique slug
+        slug,
         description,
-        tag: tag || "General", // Default tag if not provided
-        type, // Use the validated type
-        isFeatured, // Use the (potentially overridden) isFeatured value
-        readTimeMinutes, // Add calculated read time
-        user: req.user.id, // Associate the note with the logged-in user
-        // 'date' will default to Date.now as per the schema
+        tag: tag || "General",
+        category: categoryId, // Save the category ID
+        isFeatured,
+        // readTimeMinutes, // Calculated by pre-save hook now
+        user: req.user.id,
       });
 
-      // Save the new note to the database
       const savedNote = await note.save();
 
-      // Populate the user field in the saved note before sending the response
-      // This adds the user's name/email to the response object automatically
-      const populatedNote = await Note.findById(savedNote._id).populate(
-        "user", // Field to populate
-        "name email", // Fields to select from the User model
-      );
+      // Populate the response
+      const populatedNote = await Note.findById(savedNote._id)
+        .populate("user", "name email profilePictureUrl") // Select user fields
+        .populate("category", "name"); // Select category fields
 
-      // Send the successfully saved (and populated) note back to the client
-      res.status(201).json(populatedNote); // Use 201 Created status code
+      res.status(201).json(populatedNote); // Send populated note back
     } catch (error) {
       console.error("Error in /addnote route:", error.message);
-
-      // Handle potential database errors (e.g., duplicate key error if slug generation failed unexpectedly)
       if (error.code === 11000 && error.keyPattern && error.keyPattern.slug) {
         return res.status(409).json({
-          // 409 Conflict might be more appropriate here
+          success: false,
           errors: [
             {
               msg: "A note with a very similar title already exists, resulting in a duplicate URL slug. Please modify the title slightly.",
-              param: "title", // Indicate which field likely caused the issue
+              param: "title",
               location: "body",
             },
           ],
         });
       }
-
-      // Generic server error for other issues
-      res.status(500).send("Internal Server Error");
+      res.status(500).json({ success: false, error: "Internal Server Error" });
     }
   },
 );
@@ -288,39 +298,46 @@ router.post(
 router.put(
   "/updatenote/:id",
   fetchuser,
-  restrictToOwnerOrAdmin, // Add new middleware
+  restrictToOwnerOrAdmin, // This middleware already finds the note and checks permissions
   [
-    body("title", "Enter a valid title").optional().isLength({ min: 3 }),
-    body("description", "description must be atleast 5 characters")
+    body("title", "Enter a valid title").optional().trim().isLength({ min: 3 }),
+    body("description", "Description must be atleast 5 characters")
       .optional()
       .isLength({ min: 5 }),
-    body("type")
-      .optional()
-      .isIn([
-        "JavaScript",
-        "Salesforce",
-        "Sociology",
-        "Life",
-        "Technology",
-        "Creative",
-        "Tutorial",
-        "News",
-      ]), // Fix type validation
-    body("tag").optional(),
+    // --- REMOVED 'type' validation ---
+    // body("type").optional().isIn([ /* old enum values */ ]),
+    // --- ADDED 'category' validation ---
+    body("category", "Invalid Category ID format").optional().isMongoId(),
+    body("tag").optional().trim(),
     body("isFeatured").optional().isBoolean(),
+    // Optional: Add slug validation if you allow manual slug updates
+    // body("slug").optional().trim().isString().matches(/^[a-z0-9]+(?:-[a-z0-9]+)*$/)
   ],
   async (req, res) => {
-    const { title, description, tag, type } = req.body;
-    let clientIsFeatured = req.body.isFeatured;
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ success: false, errors: errors.array() });
+    }
+
+    // Note is already available in req.note from restrictToOwnerOrAdmin middleware
+    const noteToUpdate = req.note;
+
     try {
-      const errors = validationResult(req);
-      if (!errors.isEmpty()) {
-        return res.status(400).json({ errors: errors.array() });
-      }
+      const { title, description, tag, category: categoryId } = req.body;
+      let clientIsFeatured = req.body.isFeatured;
+
       const updateFields = {};
-      if (title !== undefined) updateFields.title = title;
+      let slugNeedsUpdate = false;
+
+      if (title !== undefined && title !== noteToUpdate.title) {
+        updateFields.title = title;
+        // Decide if slug should update automatically when title changes
+        // For now, let's NOT auto-update slug on edit to preserve existing URLs
+        // slugNeedsUpdate = true; // Uncomment to auto-update slug
+      }
       if (description !== undefined) {
         updateFields.description = description;
+        // Calculate read time (or rely on pre-save hook if using findByIdAndUpdate with runValidators)
         const words = description.split(/\s+/).filter(Boolean).length;
         const wordsPerMinute = 200;
         updateFields.readTimeMinutes = Math.max(
@@ -329,27 +346,73 @@ router.put(
         );
       }
       if (tag !== undefined) updateFields.tag = tag;
-      if (type !== undefined) updateFields.type = type;
+
+      // Handle category update
+      if (
+        categoryId !== undefined &&
+        categoryId !== noteToUpdate.category.toString()
+      ) {
+        const categoryExists = await Category.findById(categoryId);
+        if (!categoryExists) {
+          return res.status(400).json({
+            success: false,
+            errors: [
+              { msg: "Selected category does not exist", param: "category" },
+            ],
+          });
+        }
+        updateFields.category = categoryId;
+      }
+
+      // Handle isFeatured update (only by admin)
       if (
         clientIsFeatured !== undefined &&
         req.requestingUser.role === "admin"
       ) {
         updateFields.isFeatured = clientIsFeatured;
+      } else if (
+        clientIsFeatured !== undefined &&
+        req.requestingUser.role !== "admin"
+      ) {
+        console.warn(
+          `Non-admin user ${req.user.id} tried to change isFeatured on update for note ${req.params.id}. Ignoring.`,
+        );
       }
+
       if (Object.keys(updateFields).length === 0) {
-        return res
-          .status(400)
-          .json({ error: "No valid fields provided for update" });
+        return res.status(400).json({
+          success: false,
+          error: "No valid fields provided for update",
+        });
       }
+
       const updatedNote = await Note.findByIdAndUpdate(
         req.params.id,
         { $set: updateFields },
-        { new: true },
-      ).populate("user", "name ");
-      res.json({ note: updatedNote });
+        { new: true, runValidators: true }, // runValidators ensures schema validation on update
+      )
+        .populate("user", "name email profilePictureUrl")
+        .populate("category", "name ");
+
+      if (!updatedNote) {
+        // Should not happen due to restrictToOwnerOrAdmin, but good practice
+        return res.status(404).json({
+          success: false,
+          error: "Note not found after update attempt.",
+        });
+      }
+
+      res.json({ success: true, note: updatedNote }); // Send populated note back
     } catch (error) {
+      if (error.code === 11000 && error.keyPattern && error.keyPattern.slug) {
+        return res.status(409).json({
+          success: false,
+          error:
+            "Updating this note would result in a duplicate URL slug. Please modify the title or slug slightly.",
+        });
+      }
       console.error("Error in /updatenote:", error.message);
-      res.status(500).json({ error: "Internal Server Error" });
+      res.status(500).json({ success: false, error: "Internal Server Error" });
     }
   },
 );
@@ -372,64 +435,73 @@ router.delete(
 
 // GET Paginated notes irrespective of user
 router.get("/fetchNextNote", async (req, res) => {
-  // ... (no changes needed here, imageUrl just won't be part of the fetched note) ...
   try {
-    const { lastId, type } = req.query;
-    const limit = parseInt(req.query.limit) || 1; // Default limit
+    const { lastId, categoryIdOrSlug } = req.query; // Changed 'type' to 'categoryIdOrSlug'
+    const limit = parseInt(req.query.limit) || 9; // Default limit
     let query = {};
 
-    // Filter by type if provided and valid
-    if (type && type !== "all") {
-      const validTypes = Note.schema.path("type").enumValues;
-      if (validTypes.includes(type)) query.type = type;
-      // else: ignore invalid type or return error/empty based on desired behavior
+    // Filter by Category if provided
+    if (categoryIdOrSlug && categoryIdOrSlug !== "all") {
+      let categoryFilter = null;
+      if (mongoose.Types.ObjectId.isValid(categoryIdOrSlug)) {
+        categoryFilter = await Category.findById(categoryIdOrSlug).select(
+          "_id",
+        );
+      } else {
+        categoryFilter = await Category.findOne({
+          slug: categoryIdOrSlug,
+        }).select("_id");
+      }
+
+      if (categoryFilter) {
+        query.category = categoryFilter._id;
+      } else {
+        console.warn(
+          `Category filter specified (${categoryIdOrSlug}) but not found. Returning empty.`,
+        );
+        return res
+          .status(200)
+          .json({ success: true, notes: [], hasMore: false, nextLastId: null });
+      }
     }
 
-    // Add cursor condition if lastId is provided
+    // Pagination Logic
     if (lastId) {
       if (!mongoose.Types.ObjectId.isValid(lastId)) {
         return res
           .status(400)
           .json({ success: false, error: "Invalid lastId format" });
       }
-      // Use $lt for descending sort on _id
-      query._id = { $lt: lastId };
+      query._id = { $lt: lastId }; // Use _id for consistent sorting/pagination
     }
 
-    // Fetch notes
     const notes = await Note.find(query)
-      .sort({ _id: -1 }) // Use _id for cursor pagination (descending)
+      .sort({ _id: -1 }) // Sort by _id descending for consistent pagination
       .limit(limit)
-      .populate("user", "name "); // Populate user details
+      .populate("user", "name profilePictureUrl") // Populate user
+      .populate("category", "name"); // Populate category
 
-    // Determine the next lastId and if there are more notes
-    const nextLastId = notes.length > 0 ? notes[notes.length - 1]._id : null; // Use null if no notes found
+    const nextLastId = notes.length > 0 ? notes[notes.length - 1]._id : null;
+
+    // Check if there are more notes
     let hasMore = false;
     if (nextLastId) {
-      // Check if there are more documents beyond the current last fetched one
-      const remainingCount = await Note.countDocuments({
-        ...query, // Keep the type filter if applied
-        _id: { $lt: nextLastId }, // Check for IDs smaller than the last one fetched
-      });
+      // Count documents matching the query with _id less than the last fetched one
+      const remainingCountQuery = { ...query, _id: { $lt: nextLastId } };
+      const remainingCount = await Note.countDocuments(remainingCountQuery);
       hasMore = remainingCount > 0;
     }
 
-    console.log("fetchNextNote response:", {
-      inputLastId: lastId,
-      fetchedNoteIds: notes.map((n) => n._id),
-      outputNextLastId: nextLastId,
-      hasMore,
-      //totalRemaining: remainingCount // If you need this count
-    });
+    // console.log("fetchNextNote response:", { inputLastId: lastId, fetchedCount: notes.length, outputNextLastId: nextLastId, hasMore });
 
     res.status(200).json({
       success: true,
       notes,
       hasMore,
-      nextLastId, // Send the ID of the last item fetched
+      nextLastId,
     });
   } catch (err) {
-    console.error(err);
+    console.error("Error in fetchNextNote:", err);
     res.status(500).json({ success: false, error: "Internal Server Error" });
   }
 });
@@ -437,10 +509,9 @@ router.get("/fetchNextNote", async (req, res) => {
 // Fetch Featured Notes in Batches (Paginated)
 router.get("/featured/batch", async (req, res) => {
   try {
-    const { lastId } = req.query; // Get the last fetched note's ID
-    const limit = parseInt(req.query.limit) || 5; // Default batch size to 5
-
-    let query = { isFeatured: true }; // Base query for featured notes
+    const { lastId } = req.query;
+    const limit = parseInt(req.query.limit) || 5;
+    let query = { isFeatured: true };
 
     if (lastId) {
       if (!mongoose.Types.ObjectId.isValid(lastId)) {
@@ -448,33 +519,24 @@ router.get("/featured/batch", async (req, res) => {
           .status(400)
           .json({ success: false, error: "Invalid lastId format" });
       }
-      // Find featured notes older than the lastId (assuming _id sort descending)
       query._id = { $lt: lastId };
     }
 
     const notes = await Note.find(query)
-      .sort({ _id: -1 }) // Sort by _id descending for stable pagination
+      .sort({ _id: -1 })
       .limit(limit)
-      .populate("user", "name ");
+      .populate("user", "name profilePictureUrl") // Populate needed fields
+      .populate("category", "name "); // Populate category
 
     const nextLastId = notes.length > 0 ? notes[notes.length - 1]._id : null;
-
     let hasMore = false;
     if (nextLastId) {
-      // Check if there are any more featured notes beyond the current batch
       const remainingCount = await Note.countDocuments({
-        isFeatured: true, // Ensure we only count featured notes
+        isFeatured: true,
         _id: { $lt: nextLastId },
       });
       hasMore = remainingCount > 0;
     }
-
-    console.log("fetchFeatured/batch response:", {
-      inputLastId: lastId,
-      fetchedNoteIds: notes.map((n) => n._id),
-      outputNextLastId: nextLastId,
-      hasMore,
-    });
 
     res.status(200).json({
       success: true,
@@ -490,12 +552,12 @@ router.get("/featured/batch", async (req, res) => {
 
 // GET Featured notes
 router.get("/featured", async (req, res) => {
-  // ... (no changes needed here, imageUrl just won't be part of the fetched note) ...
   try {
-    const limit = parseInt(req.query.limit) || 3; // Default limit to 3
+    const limit = parseInt(req.query.limit) || 3;
     const featuredNotes = await Note.find({ isFeatured: true })
-      .populate("user", "name ")
-      .sort({ date: -1 }) // Sort by most recent date
+      .populate("user", "name profilePictureUrl")
+      .populate("category", "name ") // Populate category
+      .sort({ date: -1 })
       .limit(limit);
     res.json({ success: true, notes: featuredNotes });
   } catch (err) {
@@ -506,11 +568,9 @@ router.get("/featured", async (req, res) => {
 
 // GET Search notes
 router.get("/search", async (req, res) => {
-  // ... (no changes needed here) ...
   try {
     const searchQuery = req.query.query;
-    const limit = parseInt(req.query.limit) || 10; // Default limit
-
+    const limit = parseInt(req.query.limit) || 20; // Increased limit
     if (
       !searchQuery ||
       typeof searchQuery !== "string" ||
@@ -523,52 +583,148 @@ router.get("/search", async (req, res) => {
       });
     }
 
-    // Search in title, description, and tags (case-insensitive)
+    // Option 1: Search notes directly (title, description, tag)
     const notes = await Note.find({
       $or: [
         { title: { $regex: searchQuery, $options: "i" } },
         { description: { $regex: searchQuery, $options: "i" } },
-        { tag: { $regex: searchQuery, $options: "i" } }, // Also search in tag
+        { tag: { $regex: searchQuery, $options: "i" } },
       ],
     })
-      .populate("user", "name ") // Populate user info
-      .sort({ date: -1 }) // Sort by date descending
+      .populate("user", "name profilePictureUrl")
+      .populate("category", "name ") // Populate category
+      .sort({ date: -1 }) // Or sort by relevance score if using text index
       .limit(limit);
 
     res.json({ success: true, notes: notes });
   } catch (err) {
-    console.error(err.message);
+    console.error("Search Error:", err.message);
     res.status(500).send("Internal Server Error");
   }
 });
 
-// GET Distinct note types
-router.get("/types", async (req, res) => {
-  // ... (no changes needed here) ...
-  try {
-    const types = await Note.distinct("type");
-    // Filter out any null or empty string types if they exist
-    const validTypes = types.filter((type) => type);
-    res.json({ success: true, types: validTypes });
-  } catch (err) {
-    console.error(err.message);
-    res.status(500).send("Internal Server Error");
-  }
-});
-
-// GET Recent post titles
+// GET /recent - Populate Category
 router.get("/recent", async (req, res) => {
-  // ... (no changes needed here) ...
   try {
-    const limit = parseInt(req.query.limit) || 5; // Default limit
+    const limit = parseInt(req.query.limit) || 5;
     const recentNotes = await Note.find({})
-      .sort({ date: -1 }) // Sort by most recent
+      .sort({ date: -1 })
       .limit(limit)
-      .select("title _id date slug type tag"); // Select only needed fields
+      .select("title _id date slug category tag") // Keep tag, select category ID
+      .populate("category", "name "); // Populate category name/slug
+
     res.json({ success: true, notes: recentNotes });
   } catch (err) {
     console.error(err.message);
     res.status(500).send("Internal Server Error");
+  }
+});
+
+router.get("/by-category/:categoryId", async (req, res) => {
+  try {
+    const { categoryId } = req.params;
+    const { lastId } = req.query;
+    const limit = parseInt(req.query.limit) || 9; // Use a limit consistent with HomeScreen or adjust as needed
+
+    if (!mongoose.Types.ObjectId.isValid(categoryId)) {
+      return res
+        .status(400)
+        .json({ success: false, error: "Invalid Category ID format" });
+    }
+
+    // Verify category exists (optional but good practice)
+    const category = await Category.findById(categoryId).select("_id name"); // Select only needed fields
+    if (!category) {
+      return res
+        .status(404)
+        .json({ success: false, error: "Category not found" });
+    }
+
+    let query = { category: category._id };
+
+    if (lastId) {
+      if (!mongoose.Types.ObjectId.isValid(lastId)) {
+        return res
+          .status(400)
+          .json({ success: false, error: "Invalid lastId format" });
+      }
+      // Use $lt for descending sort by _id (most recent first)
+      query._id = { $lt: lastId };
+    }
+
+    const notes = await Note.find(query)
+      .sort({ _id: -1 }) // Sort by _id descending for consistent pagination
+      .limit(limit)
+      .populate("user", "name profilePictureUrl") // Keep necessary fields
+      .populate("category", "name"); // Keep necessary fields
+
+    const nextLastId = notes.length > 0 ? notes[notes.length - 1]._id : null;
+
+    let hasMore = false;
+    if (nextLastId) {
+      // Check if there's at least one more note older than the last one fetched
+      const remainingCount = await Note.countDocuments({
+        category: category._id, // Ensure we only count within the same category
+        _id: { $lt: nextLastId },
+      });
+      hasMore = remainingCount > 0;
+    }
+
+    console.log(
+      `Category ${categoryId} Notes: Fetched ${notes.length}, HasMore: ${hasMore}, NextLastId: ${nextLastId}`,
+    );
+
+    res.json({
+      success: true,
+      notes,
+      category: { name: category.name, _id: category._id }, // Include basic category info if needed
+      hasMore,
+      nextLastId,
+    });
+  } catch (error) {
+    console.error("Error fetching notes by category:", error);
+    res.status(500).json({
+      success: false,
+      error: "Server Error fetching notes by category",
+    });
+  }
+});
+
+// NEW ROUTE: Get all note titles for a specific category, sorted alphabetically
+router.get("/by-category/:categoryId/titles", async (req, res) => {
+  try {
+    const { categoryId } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(categoryId)) {
+      return res
+        .status(400)
+        .json({ success: false, error: "Invalid Category ID format" });
+    }
+
+    // Optional: Check if category exists first (good practice)
+    const categoryExists = await Category.findById(categoryId).select("_id");
+    if (!categoryExists) {
+      return res
+        .status(404)
+        .json({ success: false, error: "Category not found" });
+    }
+
+    const notes = await Note.find({ category: categoryId })
+      .select("_id title slug") // Select only needed fields
+      .sort({ title: 1 }) // Sort alphabetically by title (case-insensitive usually by default in MongoDB)
+      // For explicit case-insensitivity if needed: .collation({ locale: 'en', strength: 2 })
+      .lean(); // Use lean for performance if only reading data
+
+    console.log(
+      `Workspaceed ${notes.length} note titles for category ${categoryId}`,
+    );
+    res.json({ success: true, notes: notes });
+  } catch (error) {
+    console.error("Error fetching note titles by category:", error);
+    res.status(500).json({
+      success: false,
+      error: "Server Error fetching note titles",
+    });
   }
 });
 

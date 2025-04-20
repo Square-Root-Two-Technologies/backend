@@ -9,19 +9,24 @@
   "index.js": true,
   "middleware": {
     "fetchuser.js": true,
+    "isAdmin.js": true,
     "restrictToOwnerOrAdmin.js": true,
     "upload.js": true
   },
+  "migration_add_categories.js": true,
   "models": {
     "Category.js": true,
     "Note.js": true,
     "User.js": true
   },
   "package.json": true,
+  "populateTestData.js": true,
   "routes": {
     "auth.js": true,
+    "categories.js": true,
     "notes.js": true
-  }
+  },
+  "setup_initial_categories.js": true
 }
 
 // --- Aggregated Code Content (Comments and Blank Lines Removed) ---
@@ -95,6 +100,7 @@ app.use(cors());
 app.use(express.json());
 app.use("/api/auth", require("./routes/auth"));
 app.use("/api/notes", require("./routes/notes"));
+app.use("/api/categories", require("./routes/categories"));
 app.listen(port, () => {
   console.log(`squareroottwo backend listening at http://localhost:${port}`);
 });
@@ -121,6 +127,35 @@ const fetchuser = (req, res, next) => {
   }
 };
 module.exports = fetchuser;
+
+// FILE: middleware/isAdmin.js
+const User = require("../models/User"); 
+const isAdmin = async (req, res, next) => {
+  if (!req.user || !req.user.id) {
+    return res
+      .status(401)
+      .json({ success: false, error: "Authentication required." });
+  }
+  try {
+    const user = await User.findById(req.user.id).select("role");
+    if (!user) {
+      return res.status(401).json({ success: false, error: "User not found." });
+    }
+    if (user.role !== "admin") {
+      return res
+        .status(403)
+        .json({ success: false, error: "Forbidden: Admin access required." });
+    }
+    req.requestingUserRole = user.role;
+    next(); 
+  } catch (error) {
+    console.error("Error in isAdmin middleware:", error);
+    res
+      .status(500)
+      .json({ success: false, error: "Server error checking user role." });
+  }
+};
+module.exports = isAdmin;
 
 // FILE: middleware/restrictToOwnerOrAdmin.js
 const mongoose = require("mongoose");
@@ -162,86 +197,219 @@ const upload = multer({
 });
 module.exports = upload;
 
+// FILE: migration_add_categories.js
+require("dotenv").config({ path: "./config.env" });
+const mongoose = require("mongoose");
+const Note = require("./models/Note");
+const Category = require("./models/Category");
+const mongoURI = process.env.DATABASE;
+async function runMigration() {
+  console.log("Connecting to MongoDB...");
+  await mongoose.connect(mongoURI);
+  console.log("Connected to MongoDB successfully.");
+  let updatedCount = 0;
+  let skippedCount = 0;
+  let errorCount = 0;
+  try {
+    console.log("Fetching all categories...");
+    const categories = await Category.find({});
+    if (categories.length === 0) {
+      console.error(
+        'ERROR: No categories found in the database. Please create categories matching the old "type" values first.',
+      );
+      return;
+    }
+    const categoryMap = categories.reduce((map, cat) => {
+      map[cat.name.toLowerCase()] = cat._id;
+      return map;
+    }, {});
+    console.log(
+      `Found ${categories.length} categories. Map created:`,
+      Object.keys(categoryMap),
+    );
+    console.log("Starting note migration...");
+    const batchSize = 100;
+    let processedNotes = 0;
+    let hasMoreNotes = true;
+    let lastId = null;
+    while (hasMoreNotes) {
+      const query = {
+        $or: [
+          { category: { $exists: false } }, 
+          { type: { $exists: true } }, 
+        ],
+      };
+      if (lastId) {
+        query._id = { $gt: lastId }; 
+      }
+      const notesBatch = await Note.find(query)
+        .select("_id type") 
+        .limit(batchSize)
+        .sort({ _id: 1 }); 
+      if (notesBatch.length === 0) {
+        hasMoreNotes = false;
+        break;
+      }
+      lastId = notesBatch[notesBatch.length - 1]._id;
+      processedNotes += notesBatch.length;
+      console.log(
+        `Processing batch of ${notesBatch.length} notes (Total processed: ${processedNotes})...`,
+      );
+      for (const note of notesBatch) {
+        if (!note.type) {
+          console.warn(
+            `Note ID ${note._id} has no 'type' field and no 'category'. Skipping.`,
+          );
+          skippedCount++;
+          continue;
+        }
+        const typeLower = note.type.toLowerCase();
+        const categoryId = categoryMap[typeLower];
+        if (categoryId) {
+          try {
+            const updateResult = await Note.updateOne(
+              { _id: note._id },
+              {
+                $set: { category: categoryId }, 
+                $unset: { type: "" }, 
+              },
+            );
+            if (updateResult.modifiedCount === 1) {
+              updatedCount++;
+            } else {
+              console.warn(
+                `Note ID ${note._id} was found but not modified. Result:`,
+                updateResult,
+              );
+              skippedCount++;
+            }
+          } catch (updateError) {
+            console.error(`Error updating Note ID: ${note._id}`, updateError);
+            errorCount++;
+          }
+        } else {
+          console.warn(
+            `No category found for type "${note.type}" (Note ID: ${note._id}). Skipping.`,
+          );
+          skippedCount++;
+        }
+      }
+      console.log(
+        `Batch processed. Updated: ${updatedCount}, Skipped: ${skippedCount}, Errors: ${errorCount}`,
+      );
+    }
+    console.log("--- Migration Summary ---");
+    console.log(`Total Notes Processed (approx): ${processedNotes}`);
+    console.log(`Successfully Updated: ${updatedCount}`);
+    console.log(`Skipped (no type/category or no match): ${skippedCount}`);
+    console.log(`Errors during update: ${errorCount}`);
+    console.log("Migration finished.");
+  } catch (error) {
+    console.error("An error occurred during migration:", error);
+  } finally {
+    console.log("Disconnecting from MongoDB...");
+    await mongoose.disconnect();
+    console.log("Disconnected.");
+  }
+}
+runMigration();
+
 // FILE: models/Category.js
 const mongoose = require("mongoose");
 const { Schema } = mongoose;
-const CategorySchema = new Schema({
-  name: {
-    type: String,
-    required: true,
+const CategorySchema = new Schema(
+  {
+    name: {
+      type: String,
+      required: [true, "Category name is required."],
+      trim: true,
+      minlength: [2, "Category name must be at least 2 characters long."],
+      maxlength: [50, "Category name cannot exceed 50 characters."],
+    },
+    parent: {
+      type: Schema.Types.ObjectId,
+      ref: "Category",
+      default: null,
+    },
+    description: {
+      type: String,
+      trim: true,
+      maxlength: [200, "Description cannot exceed 200 characters."],
+      default: "",
+    },
   },
-  parent: {
-    type: Schema.Types.ObjectId,
-    ref: "Category",
-    default: null, 
+  {
+    timestamps: true,
   },
-  slug: {
-    type: String,
-    required: true,
-    unique: true, 
-  },
-  description: {
-    type: String,
-  },
-});
+);
 CategorySchema.index({ parent: 1, name: 1 }, { unique: true });
 const Category = mongoose.model("Category", CategorySchema);
+module.exports = Category;
 
 // FILE: models/Note.js
 const mongoose = require("mongoose");
 const { Schema } = mongoose;
-const NotesSchema = new Schema({
-  user: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: "user",
+const NotesSchema = new Schema(
+  {
+    user: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "user",
+      required: true, 
+    },
+    title: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    description: {
+      type: String,
+      required: true,
+    },
+    tag: {
+      type: String,
+      default: "General",
+      trim: true,
+    },
+    category: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Category", 
+      required: [true, "A category is required for each note."],
+      index: true, 
+    },
+    date: {
+      type: Date,
+      default: Date.now,
+    },
+    readTimeMinutes: {
+      type: Number,
+      required: false, 
+      min: [0, "Read time cannot be negative"],
+    },
+    isFeatured: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    slug: {
+      type: String,
+      required: true,
+      unique: true,
+      index: true,
+    },
   },
-  title: {
-    type: String,
-    required: true,
+  {
+    timestamps: true, 
   },
-  description: {
-    type: String,
-    required: true,
-  },
-  tag: {
-    type: String,
-    default: "General",
-  },
-  type: {
-    type: String,
-    enum: [
-      "JavaScript",
-      "Salesforce",
-      "Sociology",
-      "Life",
-      "Technology",
-      "Creative",
-      "Tutorial",
-      "News",
-    ],
-    required: true,
-  },
-  date: {
-    type: Date,
-    default: Date.now,
-  },
-  readTimeMinutes: {
-    type: Number,
-    required: false, 
-  },
-  isFeatured: {
-    type: Boolean,
-    default: false,
-    index: true,
-  },
-  slug: {
-    type: String,
-    required: true,
-    unique: true, 
-    index: true, 
-  },
+);
+NotesSchema.pre("save", function (next) {
+  if (this.isModified("description") || this.isNew) {
+    const words = this.description.split(/\s+/).filter(Boolean).length;
+    const wordsPerMinute = 200;
+    this.readTimeMinutes = Math.max(1, Math.ceil(words / wordsPerMinute));
+  }
+  next();
 });
-module.exports = mongoose.model("notes", NotesSchema);
+module.exports = mongoose.model("notes", NotesSchema); 
 
 // FILE: models/User.js
 const mongoose = require("mongoose");
@@ -312,6 +480,320 @@ module.exports = User;
 
 // FILE: package.json
 {"name":"squareroorwo_backend","version":"1.0.0","description":"Square Root Two Technologies","main":"index.js","scripts":{"test":"echo \"Error: no test specified\" && exit 1","start":"node index.js"},"author":"","license":"ISC","dependencies":{"bcryptjs":"^2.4.3","cloudinary":"^2.6.0","cors":"^2.8.5","dotenv":"^16.5.0","express":"^4.17.1","express-validator":"^6.12.1","google-auth-library":"^9.15.1","jsonwebtoken":"^9.0.0","lorem-ipsum":"^2.0.8","mongoose":"^6.13.8","multer":"^1.4.5-lts.2","slugify":"^1.6.6"},"devDependencies":{"nodemon":"^2.0.12"}}
+
+// FILE: populateTestData.js
+const mongoose = require("mongoose");
+const bcrypt = require("bcryptjs");
+const { LoremIpsum } = require("lorem-ipsum");
+const slugify = require("slugify");
+const dotenv = require("dotenv");
+dotenv.config({ path: "./config.env" });
+const connectToMongo = require("./db");
+const User = require("./models/User");
+const Note = require("./models/Note");
+const Category = require("./models/Category");
+connectToMongo();
+const lorem = new LoremIpsum({
+  sentencesPerParagraph: { max: 8, min: 4 },
+  wordsPerSentence: { max: 16, min: 4 },
+});
+const testUsers = [
+  {
+    name: "Admin User",
+    email: "admin@example.com",
+    password: "admin123", 
+    country: "USA",
+    city: "New York",
+    about: "I am the admin.",
+    role: "admin",
+  },
+];
+async function createTestUsers() {
+  try {
+    console.log("Clearing existing users...");
+    await User.deleteMany({}); 
+    console.log("Creating test admin user...");
+    const salt = await bcrypt.genSalt(10);
+    const secPass = await bcrypt.hash(testUsers[0].password, salt);
+    const user = await User.create({
+      name: testUsers[0].name,
+      email: testUsers[0].email,
+      password: secPass,
+      country: testUsers[0].country,
+      city: testUsers[0].city,
+      about: testUsers[0].about,
+      role: testUsers[0].role,
+    });
+    console.log(`Created user: ${user.name} (ID: ${user._id})`);
+    return [user]; 
+  } catch (error) {
+    console.error("Error creating user:", error);
+    process.exit(1); 
+  }
+}
+const initialTopLevelCategories = [
+  {
+    name: "JavaScript",
+    description: "Posts related to JavaScript programming.",
+  },
+  {
+    name: "Salesforce",
+    description: "Posts about Salesforce CRM and platform.",
+  },
+  { name: "Sociology", description: "Posts related to sociological topics." },
+  {
+    name: "Life",
+    description: "Posts about life experiences and reflections.",
+  },
+  { name: "Technology", description: "General technology posts." },
+  {
+    name: "Creative",
+    description: "Posts about creative projects or processes.",
+  },
+  { name: "Tutorial", description: "How-to guides and tutorials." },
+  { name: "News", description: "News related updates." },
+  { name: "General", description: "General uncategorized posts." }, 
+];
+const subCategoryDefinitions = [
+  {
+    parentName: "Technology",
+    name: "Web Development",
+    description: "Frontend and backend web technologies.",
+  },
+  {
+    parentName: "Technology",
+    name: "Cloud Computing",
+    description: "AWS, Azure, GCP, and other cloud platforms.",
+  },
+  {
+    parentName: "Salesforce",
+    name: "Apex",
+    description: "Salesforce Apex programming language.",
+  },
+  {
+    parentName: "Salesforce",
+    name: "Flows",
+    description: "Salesforce Flow automation.",
+  },
+  {
+    parentName: "JavaScript",
+    name: "React",
+    description: "React library for building user interfaces.",
+  },
+  {
+    parentName: "JavaScript",
+    name: "Node.js",
+    description: "Node.js runtime environment.",
+  },
+];
+async function setupTopLevelCategories() {
+  let createdCount = 0;
+  let skippedCount = 0;
+  const createdOrFoundCategories = [];
+  console.log("Attempting to create/find initial top-level categories...");
+  for (const catData of initialTopLevelCategories) {
+    try {
+      const existing = await Category.findOne({
+        name: { $regex: `^${catData.name}$`, $options: "i" },
+        parent: null, 
+      });
+      if (existing) {
+        console.log(
+          `Top-level category "${catData.name}" already exists. Skipping creation.`,
+        );
+        skippedCount++;
+        createdOrFoundCategories.push(existing); 
+      } else {
+        const newCategory = new Category({
+          ...catData,
+          parent: null, 
+        });
+        await newCategory.save();
+        console.log(`Created top-level category: "${newCategory.name}"`);
+        createdCount++;
+        createdOrFoundCategories.push(newCategory); 
+      }
+    } catch (error) {
+      console.error(
+        `Error processing top-level category "${catData.name}":`,
+        error,
+      );
+    }
+  }
+  console.log("--- Top-Level Category Setup Summary ---");
+  console.log(`Created: ${createdCount}`);
+  console.log(`Skipped (already existed): ${skippedCount}`);
+  return createdOrFoundCategories;
+}
+async function setupSubCategories(parentCategories) {
+  let createdCount = 0;
+  let skippedCount = 0;
+  let errorCount = 0;
+  const createdOrFoundSubCategories = [];
+  const parentMap = parentCategories.reduce((map, cat) => {
+    map[cat.name.toLowerCase()] = cat._id;
+    return map;
+  }, {});
+  console.log("\nAttempting to create subcategories...");
+  for (const subCatData of subCategoryDefinitions) {
+    const parentId = parentMap[subCatData.parentName.toLowerCase()];
+    if (!parentId) {
+      console.warn(
+        `Parent category "${subCatData.parentName}" not found for subcategory "${subCatData.name}". Skipping.`,
+      );
+      errorCount++;
+      continue;
+    }
+    try {
+      const existingSub = await Category.findOne({
+        name: { $regex: `^${subCatData.name}$`, $options: "i" },
+        parent: parentId,
+      });
+      if (existingSub) {
+        console.log(
+          `Subcategory "${subCatData.name}" under "${subCatData.parentName}" already exists. Skipping.`,
+        );
+        skippedCount++;
+        createdOrFoundSubCategories.push(existingSub);
+      } else {
+        const newSubCategory = new Category({
+          name: subCatData.name,
+          description: subCatData.description,
+          parent: parentId,
+        });
+        await newSubCategory.save();
+        console.log(
+          `Created subcategory: "${newSubCategory.name}" under "${subCatData.parentName}"`,
+        );
+        createdCount++;
+        createdOrFoundSubCategories.push(newSubCategory);
+      }
+    } catch (error) {
+      console.error(`Error creating subcategory "${subCatData.name}":`, error);
+      errorCount++;
+    }
+  }
+  console.log("--- Subcategory Setup Summary ---");
+  console.log(`Created: ${createdCount}`);
+  console.log(`Skipped (already existed): ${skippedCount}`);
+  console.log(`Errors (e.g., parent not found): ${errorCount}`);
+  return createdOrFoundSubCategories;
+}
+async function createTestNotes(users, allCategories) {
+  try {
+    console.log("\nClearing existing notes...");
+    await Note.deleteMany({}); 
+    const notesCount = 150; 
+    const user = users[0]; 
+    if (!user || !user._id) {
+      console.error(
+        "Admin user was not created successfully. Cannot create notes.",
+      );
+      process.exit(1);
+    }
+    if (!allCategories || allCategories.length === 0) {
+      console.error("No categories provided to createTestNotes function.");
+      process.exit(1);
+    }
+    console.log(
+      `Starting creation of ${notesCount} notes for user ${user.email}, distributed across ${allCategories.length} categories...`,
+    );
+    for (let i = 0; i < notesCount; i++) {
+      const randomCategory =
+        allCategories[Math.floor(Math.random() * allCategories.length)];
+      const categoryId = randomCategory._id;
+      const categoryName = randomCategory.name; 
+      const title = `${categoryName} Post ${i + 1}: ${lorem.generateWords(
+        Math.floor(Math.random() * 3) + 2, 
+      )}`;
+      const description = lorem.generateParagraphs(
+        Math.floor(Math.random() * 2) + 1,
+      ); 
+      const tag = lorem.generateWords(1);
+      const isFeatured = Math.random() < 0.15; 
+      let baseSlug = slugify(title, {
+        lower: true, 
+        strict: true, 
+        remove: /[*+~.()'"!:@]/g, 
+      });
+      if (!baseSlug) {
+        baseSlug = `note-${Date.now()}-${i}`;
+      }
+      let slug = baseSlug;
+      let counter = 1;
+      let existingNote = await Note.findOne({ slug: slug });
+      while (existingNote) {
+        counter++;
+        slug = `${baseSlug}-${counter}`;
+        existingNote = await Note.findOne({ slug: slug });
+      }
+      const noteData = {
+        user: user._id,
+        title: title,
+        slug: slug, 
+        description,
+        tag,
+        category: categoryId, 
+        isFeatured,
+      };
+      try {
+        await Note.create(noteData);
+        if ((i + 1) % 25 === 0) {
+          console.log(`Created note ${i + 1}/${notesCount}...`);
+        }
+      } catch (noteError) {
+        if (
+          noteError.code === 11000 &&
+          noteError.keyPattern &&
+          noteError.keyPattern.slug
+        ) {
+          console.warn(
+            `WARN: Slug collision occurred for title "${title}" (Slug: ${slug}) even after check. Skipping this note.`,
+          );
+        } else {
+          console.error(
+            `Error creating note "${title}" (Category: ${categoryName}, Slug: ${slug}):`,
+            noteError.message,
+          );
+        }
+      }
+    }
+    console.log(`Successfully attempted creation of ${notesCount} notes.`);
+  } catch (error) {
+    console.error("Error during the note creation process:", error);
+    process.exit(1); 
+  }
+}
+async function main() {
+  console.log("Starting test data population...");
+  try {
+    const topLevelCategories = await setupTopLevelCategories();
+    const subCategories = await setupSubCategories(topLevelCategories);
+    const allCategories = [...topLevelCategories, ...subCategories];
+    if (allCategories.length === 0) {
+      console.error(
+        "ERROR: No categories found or created. Cannot proceed with note creation.",
+      );
+      process.exit(1);
+    }
+    console.log(
+      `\nTotal categories available for notes: ${allCategories.length}`,
+    );
+    const users = await createTestUsers();
+    if (users && users.length > 0) {
+      await createTestNotes(users, allCategories); 
+      console.log("\nTest data population completed successfully!");
+    } else {
+      console.error("User creation failed, skipping note creation.");
+    }
+  } catch (error) {
+    console.error("An error occurred during the main execution:", error);
+  } finally {
+    await mongoose.connection.close();
+    console.log("\nDatabase connection closed.");
+  }
+}
+main();
 
 // FILE: routes/auth.js
 const express = require("express");
@@ -657,12 +1139,266 @@ router.post("/google-login", async (req, res) => {
 });
 module.exports = router;
 
+// FILE: routes/categories.js
+const express = require("express");
+const router = express.Router();
+const Category = require("../models/Category");
+const Note = require("../models/Note");
+const User = require("../models/User");
+const fetchuser = require("../middleware/fetchuser");
+const isAdmin = require("../middleware/isAdmin");
+const { body, validationResult } = require("express-validator");
+const mongoose = require("mongoose");
+router.get("/", async (req, res) => {
+  try {
+    const categories = await Category.find()
+      .sort({ parent: 1, name: 1 })
+      .lean();
+    res.json({ success: true, categories });
+  } catch (error) {
+    console.error("Error fetching categories:", error);
+    res
+      .status(500)
+      .json({ success: false, error: "Server Error fetching categories" });
+  }
+});
+router.get("/tree", async (req, res) => {
+  try {
+    const allCategories = await Category.find().sort({ name: 1 }).lean();
+    const categoryMap = {};
+    const categoryTree = [];
+    allCategories.forEach((category) => {
+      categoryMap[category._id.toString()] = { ...category, children: [] };
+    });
+    allCategories.forEach((category) => {
+      const categoryNode = categoryMap[category._id.toString()];
+      if (category.parent && categoryMap[category.parent.toString()]) {
+        categoryMap[category.parent.toString()].children.push(categoryNode);
+      } else {
+        categoryTree.push(categoryNode);
+      }
+    });
+    res.json({ success: true, categoryTree });
+  } catch (error) {
+    console.error("Error fetching category tree:", error);
+    res
+      .status(500)
+      .json({ success: false, error: "Server Error fetching category tree" });
+  }
+});
+router.get("/:id", async (req, res) => {
+  try {
+    const categoryId = req.params.id;
+    if (!mongoose.Types.ObjectId.isValid(categoryId)) {
+      return res
+        .status(400)
+        .json({ success: false, error: "Invalid Category ID format" });
+    }
+    const category = await Category.findById(categoryId).populate(
+      "parent",
+      "name",
+    ); 
+    if (!category) {
+      return res
+        .status(404)
+        .json({ success: false, error: "Category not found" });
+    }
+    res.json({ success: true, category });
+  } catch (error) {
+    console.error("Error fetching single category:", error);
+    res
+      .status(500)
+      .json({ success: false, error: "Server Error fetching category" });
+  }
+});
+router.post(
+  "/",
+  fetchuser,
+  isAdmin,
+  [
+    body("name", "Category name is required and must be 2-50 characters")
+      .trim()
+      .isLength({ min: 2, max: 50 }),
+    body("parent")
+      .optional({ values: "falsy" })
+      .if(body("parent").notEmpty())
+      .isMongoId()
+      .withMessage("Invalid parent category ID"),
+    body("description")
+      .optional()
+      .trim()
+      .isLength({ max: 200 })
+      .withMessage("Description cannot exceed 200 characters"),
+  ],
+  async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ success: false, errors: errors.array() });
+    }
+    try {
+      const { name, description } = req.body;
+      const parentId =
+        req.body.parent && mongoose.Types.ObjectId.isValid(req.body.parent)
+          ? req.body.parent
+          : null;
+      if (parentId) {
+        const parentCategory = await Category.findById(parentId);
+        if (!parentCategory) {
+          return res.status(400).json({
+            success: false,
+            errors: [{ msg: "Parent category not found", param: "parent" }],
+          });
+        }
+      }
+      const newCategory = new Category({
+        name,
+        parent: parentId,
+        description,
+      });
+      await newCategory.save();
+      res.status(201).json({ success: true, category: newCategory });
+    } catch (error) {
+      if (error.code === 11000) {
+        return res.status(409).json({
+          success: false,
+          error: `A category with the same name already exists under this parent.`, 
+        });
+      }
+      console.error("Error creating category:", error);
+      res
+        .status(500)
+        .json({ success: false, error: "Server Error creating category" });
+    }
+  },
+);
+router.put(
+  "/:id",
+  fetchuser,
+  isAdmin,
+  [
+    body("name", "Category name must be 2-50 characters")
+      .optional()
+      .trim()
+      .isLength({ min: 2, max: 50 }),
+    body("parent")
+      .optional({ values: "falsy" })
+      .if(body("parent").notEmpty())
+      .isMongoId()
+      .withMessage("Invalid parent category ID"),
+    body("description")
+      .optional()
+      .trim()
+      .isLength({ max: 200 })
+      .withMessage("Description cannot exceed 200 characters"),
+  ],
+  async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ success: false, errors: errors.array() });
+    }
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res
+        .status(400)
+        .json({ success: false, error: "Invalid category ID format" });
+    }
+    try {
+      const categoryId = req.params.id;
+      const { name, parent, description } = req.body;
+      const categoryToUpdate = await Category.findById(categoryId);
+      if (!categoryToUpdate) {
+        return res
+          .status(404)
+          .json({ success: false, error: "Category not found" });
+      }
+      const updateData = {};
+      if (name !== undefined && name !== categoryToUpdate.name) {
+        updateData.name = name;
+      }
+      if (parent !== undefined) {
+        const parentId =
+          parent && mongoose.Types.ObjectId.isValid(parent) ? parent : null;
+        if (parentId && parentId.toString() === categoryId) {
+          return res.status(400).json({
+            success: false,
+            error: "Cannot set category as its own parent.",
+          });
+        }
+        if (parentId) {
+          const parentCategory = await Category.findById(parentId);
+          if (!parentCategory) {
+            return res.status(400).json({
+              success: false,
+              errors: [{ msg: "Parent category not found", param: "parent" }],
+            });
+          }
+        }
+        updateData.parent = parentId;
+      }
+      if (description !== undefined) updateData.description = description;
+      if (Object.keys(updateData).length === 0) {
+        return res
+          .status(400)
+          .json({ success: false, error: "No fields provided for update." });
+      }
+      const updatedCategory = await Category.findByIdAndUpdate(
+        categoryId,
+        updateData,
+        { new: true, runValidators: true },
+      );
+      res.json({ success: true, category: updatedCategory });
+    } catch (error) {
+      if (error.code === 11000) {
+        return res.status(409).json({
+          success: false,
+          error: `Updating this category conflicts with an existing one (likely same name under the same parent).`,
+        });
+      }
+      console.error("Error updating category:", error);
+      res
+        .status(500)
+        .json({ success: false, error: "Server Error updating category" });
+    }
+  },
+);
+router.get("/tree/structured", async (req, res) => {
+  try {
+    const allCategories = await Category.find()
+      .select("name parent description _id")
+      .lean(); 
+    const categoryMap = {};
+    const categoryTree = [];
+    allCategories.forEach((category) => {
+      categoryMap[category._id.toString()] = { ...category, children: [] };
+    });
+    allCategories.forEach((category) => {
+      const categoryNode = categoryMap[category._id.toString()];
+      if (category.parent && categoryMap[category.parent.toString()]) {
+        categoryMap[category.parent.toString()].children.push(categoryNode);
+        categoryMap[category.parent.toString()].children.sort((a, b) =>
+          a.name.localeCompare(b.name),
+        );
+      } else {
+        categoryTree.push(categoryNode);
+      }
+    });
+    categoryTree.sort((a, b) => a.name.localeCompare(b.name));
+    res.json({ success: true, categoryTree });
+  } catch (error) {
+    console.error("Error fetching category tree:", error);
+    res
+      .status(500)
+      .json({ success: false, error: "Server Error fetching category tree" });
+  }
+});
+module.exports = router;
+
 // FILE: routes/notes.js
 const express = require("express");
 const router = express.Router();
 const fetchuser = require("../middleware/fetchuser");
 const User = require("../models/User");
 const Note = require("../models/Note");
+const Category = require("../models/Category");
 const { body, validationResult } = require("express-validator");
 const mongoose = require("mongoose");
 var restrictToOwnerOrAdmin = require("../middleware/restrictToOwnerOrAdmin");
@@ -673,7 +1409,9 @@ router.get("/fetchNotesIrrespective/:id", async (req, res) => {
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({ error: "Invalid Note ID format" });
     }
-    const note = await Note.findById(id).populate("user", "name  _id role");
+    const note = await Note.findById(id)
+      .populate("user", "name  _id role profilePictureUrl")
+      .populate("category", "name");
     if (!note) {
       return res.status(404).json({ error: "Note not found" });
     }
@@ -686,16 +1424,21 @@ router.get("/fetchNotesIrrespective/:id", async (req, res) => {
 router.get("/fetchNoteBySlug/:slug", async (req, res) => {
   try {
     const slug = req.params.slug;
-    const note = await Note.findOne({ slug: slug }).populate(
-      "user",
-      "name _id role profilePictureUrl",
-    ); 
+    const note = await Note.findOne({ slug: slug })
+      .populate("user", "name _id role profilePictureUrl") 
+      .populate("category", "name parent _id"); 
     if (!note) {
       console.warn(`Note not found with slug: ${slug}`);
-      return res.status(404).json({ error: "Note not found" }); 
+      return res.status(404).json({ error: "Note not found" });
     }
+    let ancestorPath = [];
+    if (note.category && note.category._id) {
+      ancestorPath = await getCategoryAncestors(note.category._id);
+    }
+    const noteObject = note.toObject();
+    noteObject.ancestorPath = ancestorPath; 
     console.log(`Note found by slug ${slug}: ${note.title}`);
-    res.status(200).json(note);
+    res.status(200).json(noteObject); 
   } catch (err) {
     console.error("Error fetching note by slug:", err.message);
     if (err instanceof mongoose.Error.CastError) {
@@ -704,10 +1447,34 @@ router.get("/fetchNoteBySlug/:slug", async (req, res) => {
     res.status(500).json({ error: "Internal Server Error" });
   }
 });
+async function getCategoryAncestors(categoryId) {
+  if (!categoryId || !mongoose.Types.ObjectId.isValid(categoryId)) {
+    return [];
+  }
+  let ancestors = [];
+  let currentId = categoryId;
+  try {
+    while (currentId) {
+      const category = await Category.findById(currentId)
+        .select("_id name parent")
+        .lean();
+      if (!category) {
+        break; 
+      }
+      ancestors.unshift({ _id: category._id, name: category.name });
+      currentId = category.parent; 
+    }
+  } catch (err) {
+    console.error("Error fetching ancestors for category", categoryId, err);
+    return ancestors;
+  }
+  return ancestors;
+}
 router.get("/fetchNotesIrrespective", async (req, res) => {
   try {
     const allNotes = await Note.find({})
       .populate("user", "name")
+      .populate("category", "name")
       .sort({ date: -1 });
     res.status(200).json(allNotes);
   } catch (err) {
@@ -722,21 +1489,23 @@ router.get("/fetchallnotes", fetchuser, async (req, res) => {
       return res.status(401).json({ error: "User not found or invalid token" });
     }
     let notes;
+    const populateFields = [
+      { path: "user", select: "name email profilePictureUrl" },
+      { path: "category", select: "name" },
+    ];
     if (requestingUser.role === "admin") {
       console.log(
         "Fetching all notes for admin user:",
         requestingUser.email || req.user.id,
       );
-      notes = await Note.find({})
-        .populate("user", "name email ")
-        .sort({ date: -1 });
+      notes = await Note.find({}).populate(populateFields).sort({ date: -1 });
     } else {
       console.log(
         "Fetching notes for regular user:",
         requestingUser.email || req.user.id,
       );
       notes = await Note.find({ user: req.user.id })
-        .populate("user", "name ")
+        .populate(populateFields)
         .sort({ date: -1 });
     }
     res.json(notes);
@@ -769,108 +1538,104 @@ router.get("/fetchNotesIrrespectiveByType/:type", async (req, res) => {
 });
 router.post(
   "/addnote",
-  fetchuser, 
+  fetchuser,
   [
-    body("title", "Enter a valid title").isLength({ min: 3 }),
-    body("description", "description must be atleast 5 characters").isLength({
+    body("title", "Enter a valid title").trim().isLength({ min: 3 }),
+    body("description", "Description must be atleast 5 characters").isLength({
       min: 5,
     }),
-    body("type")
-      .isIn([
-        "JavaScript",
-        "Salesforce",
-        "Sociology",
-        "Life",
-        "Technology",
-        "Creative",
-        "Tutorial",
-        "News",
-      ])
-      .withMessage("Invalid note type selected."), 
-    body("tag").optional().isString(),
+    body("category", "Category is required")
+      .isMongoId()
+      .withMessage("Invalid Category ID format."),
+    body("tag").optional().trim().isString(),
     body("isFeatured").optional().isBoolean(),
   ],
   async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      console.error(
+        "Validation errors in /addnote:",
+        JSON.stringify(errors.array()),
+      );
+      return res.status(400).json({ success: false, errors: errors.array() });
+    }
     try {
-      const errors = validationResult(req);
-      if (!errors.isEmpty()) {
-        console.error(
-          "Validation errors in /addnote:",
-          JSON.stringify(errors.array()),
-        );
-        return res.status(400).json({ errors: errors.array() });
-      }
       const requestingUser = await User.findById(req.user.id).select(
-        "role email", 
+        "role email",
       );
       if (!requestingUser) {
         return res
           .status(401)
-          .send({ error: "User not found or invalid token." });
+          .json({ success: false, error: "User not found or invalid token." });
       }
-      const { title, description, tag, type } = req.body;
-      let isFeatured = req.body.isFeatured || false; 
+      const { title, description, tag, category: categoryId } = req.body; 
+      let isFeatured = req.body.isFeatured || false;
+      const categoryExists = await Category.findById(categoryId);
+      if (!categoryExists) {
+        return res.status(400).json({
+          success: false,
+          errors: [
+            { msg: "Selected category does not exist", param: "category" },
+          ],
+        });
+      }
       if (isFeatured && requestingUser.role !== "admin") {
         console.warn(
           `User ${requestingUser.email || req.user.id} (role: ${
             requestingUser.role
           }) attempted to set isFeatured=true on add. Forcing to false.`,
         );
-        isFeatured = false; 
+        isFeatured = false;
       }
       let baseSlug = slugify(title, {
-        lower: true, 
-        strict: true, 
-        remove: /[*+~.()'"!:@]/g, 
+        lower: true,
+        strict: true,
+        remove: /[*+~.()'"!:@]/g,
       });
       if (!baseSlug) {
-        baseSlug = `note-${Date.now()}`; 
+        baseSlug = `note-${Date.now()}`;
       }
       let slug = baseSlug;
       let counter = 1;
-      let existingNote = await Note.findOne({ slug: slug }); 
+      let existingNote = await Note.findOne({ slug: slug });
       while (existingNote) {
         counter++;
         slug = `${baseSlug}-${counter}`;
         console.log(
           `Slug collision detected for '${baseSlug}'. Trying new slug: ${slug}`,
         );
-        existingNote = await Note.findOne({ slug: slug }); 
+        existingNote = await Note.findOne({ slug: slug });
       }
       console.log(`Final generated slug for note '${title}': ${slug}`);
-      const words = description.split(/\s+/).filter(Boolean).length; 
-      const wordsPerMinute = 200; 
-      const readTimeMinutes = Math.max(1, Math.ceil(words / wordsPerMinute)); 
       const note = new Note({
         title,
-        slug, 
+        slug,
         description,
-        tag: tag || "General", 
-        type, 
-        isFeatured, 
-        readTimeMinutes, 
-        user: req.user.id, 
+        tag: tag || "General",
+        category: categoryId, 
+        isFeatured,
+        user: req.user.id,
       });
       const savedNote = await note.save();
-      const populatedNote = await Note.findById(savedNote._id).populate(
-        "user", 
-        "name email", 
-      );
+      const populatedNote = await Note.findById(savedNote._id)
+        .populate("user", "name email profilePictureUrl") 
+        .populate("category", "name"); 
       res.status(201).json(populatedNote); 
     } catch (error) {
       console.error("Error in /addnote route:", error.message);
       if (error.code === 11000 && error.keyPattern && error.keyPattern.slug) {
         return res.status(409).json({
+          success: false,
           errors: [
             {
               msg: "A note with a very similar title already exists, resulting in a duplicate URL slug. Please modify the title slightly.",
-              param: "title", 
+              param: "title",
               location: "body",
             },
           ],
         });
       }
-      res.status(500).send("Internal Server Error");
+      res.status(500).json({ success: false, error: "Internal Server Error" });
     }
   },
 );
@@ -879,35 +1644,28 @@ router.put(
   fetchuser,
   restrictToOwnerOrAdmin, 
   [
-    body("title", "Enter a valid title").optional().isLength({ min: 3 }),
-    body("description", "description must be atleast 5 characters")
+    body("title", "Enter a valid title").optional().trim().isLength({ min: 3 }),
+    body("description", "Description must be atleast 5 characters")
       .optional()
       .isLength({ min: 5 }),
-    body("type")
-      .optional()
-      .isIn([
-        "JavaScript",
-        "Salesforce",
-        "Sociology",
-        "Life",
-        "Technology",
-        "Creative",
-        "Tutorial",
-        "News",
-      ]), 
-    body("tag").optional(),
+    body("category", "Invalid Category ID format").optional().isMongoId(),
+    body("tag").optional().trim(),
     body("isFeatured").optional().isBoolean(),
   ],
   async (req, res) => {
-    const { title, description, tag, type } = req.body;
-    let clientIsFeatured = req.body.isFeatured;
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ success: false, errors: errors.array() });
+    }
+    const noteToUpdate = req.note;
     try {
-      const errors = validationResult(req);
-      if (!errors.isEmpty()) {
-        return res.status(400).json({ errors: errors.array() });
-      }
+      const { title, description, tag, category: categoryId } = req.body;
+      let clientIsFeatured = req.body.isFeatured;
       const updateFields = {};
-      if (title !== undefined) updateFields.title = title;
+      let slugNeedsUpdate = false;
+      if (title !== undefined && title !== noteToUpdate.title) {
+        updateFields.title = title;
+      }
       if (description !== undefined) {
         updateFields.description = description;
         const words = description.split(/\s+/).filter(Boolean).length;
@@ -918,27 +1676,64 @@ router.put(
         );
       }
       if (tag !== undefined) updateFields.tag = tag;
-      if (type !== undefined) updateFields.type = type;
+      if (
+        categoryId !== undefined &&
+        categoryId !== noteToUpdate.category.toString()
+      ) {
+        const categoryExists = await Category.findById(categoryId);
+        if (!categoryExists) {
+          return res.status(400).json({
+            success: false,
+            errors: [
+              { msg: "Selected category does not exist", param: "category" },
+            ],
+          });
+        }
+        updateFields.category = categoryId;
+      }
       if (
         clientIsFeatured !== undefined &&
         req.requestingUser.role === "admin"
       ) {
         updateFields.isFeatured = clientIsFeatured;
+      } else if (
+        clientIsFeatured !== undefined &&
+        req.requestingUser.role !== "admin"
+      ) {
+        console.warn(
+          `Non-admin user ${req.user.id} tried to change isFeatured on update for note ${req.params.id}. Ignoring.`,
+        );
       }
       if (Object.keys(updateFields).length === 0) {
-        return res
-          .status(400)
-          .json({ error: "No valid fields provided for update" });
+        return res.status(400).json({
+          success: false,
+          error: "No valid fields provided for update",
+        });
       }
       const updatedNote = await Note.findByIdAndUpdate(
         req.params.id,
         { $set: updateFields },
-        { new: true },
-      ).populate("user", "name ");
-      res.json({ note: updatedNote });
+        { new: true, runValidators: true }, 
+      )
+        .populate("user", "name email profilePictureUrl")
+        .populate("category", "name ");
+      if (!updatedNote) {
+        return res.status(404).json({
+          success: false,
+          error: "Note not found after update attempt.",
+        });
+      }
+      res.json({ success: true, note: updatedNote }); 
     } catch (error) {
+      if (error.code === 11000 && error.keyPattern && error.keyPattern.slug) {
+        return res.status(409).json({
+          success: false,
+          error:
+            "Updating this note would result in a duplicate URL slug. Please modify the title or slug slightly.",
+        });
+      }
       console.error("Error in /updatenote:", error.message);
-      res.status(500).json({ error: "Internal Server Error" });
+      res.status(500).json({ success: false, error: "Internal Server Error" });
     }
   },
 );
@@ -958,12 +1753,30 @@ router.delete(
 );
 router.get("/fetchNextNote", async (req, res) => {
   try {
-    const { lastId, type } = req.query;
-    const limit = parseInt(req.query.limit) || 1; 
+    const { lastId, categoryIdOrSlug } = req.query; 
+    const limit = parseInt(req.query.limit) || 9; 
     let query = {};
-    if (type && type !== "all") {
-      const validTypes = Note.schema.path("type").enumValues;
-      if (validTypes.includes(type)) query.type = type;
+    if (categoryIdOrSlug && categoryIdOrSlug !== "all") {
+      let categoryFilter = null;
+      if (mongoose.Types.ObjectId.isValid(categoryIdOrSlug)) {
+        categoryFilter = await Category.findById(categoryIdOrSlug).select(
+          "_id",
+        );
+      } else {
+        categoryFilter = await Category.findOne({
+          slug: categoryIdOrSlug,
+        }).select("_id");
+      }
+      if (categoryFilter) {
+        query.category = categoryFilter._id;
+      } else {
+        console.warn(
+          `Category filter specified (${categoryIdOrSlug}) but not found. Returning empty.`,
+        );
+        return res
+          .status(200)
+          .json({ success: true, notes: [], hasMore: false, nextLastId: null });
+      }
     }
     if (lastId) {
       if (!mongoose.Types.ObjectId.isValid(lastId)) {
@@ -971,43 +1784,36 @@ router.get("/fetchNextNote", async (req, res) => {
           .status(400)
           .json({ success: false, error: "Invalid lastId format" });
       }
-      query._id = { $lt: lastId };
+      query._id = { $lt: lastId }; 
     }
     const notes = await Note.find(query)
       .sort({ _id: -1 }) 
       .limit(limit)
-      .populate("user", "name "); 
-    const nextLastId = notes.length > 0 ? notes[notes.length - 1]._id : null; 
+      .populate("user", "name profilePictureUrl") 
+      .populate("category", "name"); 
+    const nextLastId = notes.length > 0 ? notes[notes.length - 1]._id : null;
     let hasMore = false;
     if (nextLastId) {
-      const remainingCount = await Note.countDocuments({
-        ...query, 
-        _id: { $lt: nextLastId }, 
-      });
+      const remainingCountQuery = { ...query, _id: { $lt: nextLastId } };
+      const remainingCount = await Note.countDocuments(remainingCountQuery);
       hasMore = remainingCount > 0;
     }
-    console.log("fetchNextNote response:", {
-      inputLastId: lastId,
-      fetchedNoteIds: notes.map((n) => n._id),
-      outputNextLastId: nextLastId,
-      hasMore,
-    });
     res.status(200).json({
       success: true,
       notes,
       hasMore,
-      nextLastId, 
+      nextLastId,
     });
   } catch (err) {
-    console.error(err);
+    console.error("Error in fetchNextNote:", err);
     res.status(500).json({ success: false, error: "Internal Server Error" });
   }
 });
 router.get("/featured/batch", async (req, res) => {
   try {
-    const { lastId } = req.query; 
-    const limit = parseInt(req.query.limit) || 5; 
-    let query = { isFeatured: true }; 
+    const { lastId } = req.query;
+    const limit = parseInt(req.query.limit) || 5;
+    let query = { isFeatured: true };
     if (lastId) {
       if (!mongoose.Types.ObjectId.isValid(lastId)) {
         return res
@@ -1017,24 +1823,19 @@ router.get("/featured/batch", async (req, res) => {
       query._id = { $lt: lastId };
     }
     const notes = await Note.find(query)
-      .sort({ _id: -1 }) 
+      .sort({ _id: -1 })
       .limit(limit)
-      .populate("user", "name ");
+      .populate("user", "name profilePictureUrl") 
+      .populate("category", "name "); 
     const nextLastId = notes.length > 0 ? notes[notes.length - 1]._id : null;
     let hasMore = false;
     if (nextLastId) {
       const remainingCount = await Note.countDocuments({
-        isFeatured: true, 
+        isFeatured: true,
         _id: { $lt: nextLastId },
       });
       hasMore = remainingCount > 0;
     }
-    console.log("fetchFeatured/batch response:", {
-      inputLastId: lastId,
-      fetchedNoteIds: notes.map((n) => n._id),
-      outputNextLastId: nextLastId,
-      hasMore,
-    });
     res.status(200).json({
       success: true,
       notes,
@@ -1048,10 +1849,11 @@ router.get("/featured/batch", async (req, res) => {
 });
 router.get("/featured", async (req, res) => {
   try {
-    const limit = parseInt(req.query.limit) || 3; 
+    const limit = parseInt(req.query.limit) || 3;
     const featuredNotes = await Note.find({ isFeatured: true })
-      .populate("user", "name ")
-      .sort({ date: -1 }) 
+      .populate("user", "name profilePictureUrl")
+      .populate("category", "name ") 
+      .sort({ date: -1 })
       .limit(limit);
     res.json({ success: true, notes: featuredNotes });
   } catch (err) {
@@ -1062,7 +1864,7 @@ router.get("/featured", async (req, res) => {
 router.get("/search", async (req, res) => {
   try {
     const searchQuery = req.query.query;
-    const limit = parseInt(req.query.limit) || 10; 
+    const limit = parseInt(req.query.limit) || 20; 
     if (
       !searchQuery ||
       typeof searchQuery !== "string" ||
@@ -1078,39 +1880,150 @@ router.get("/search", async (req, res) => {
       $or: [
         { title: { $regex: searchQuery, $options: "i" } },
         { description: { $regex: searchQuery, $options: "i" } },
-        { tag: { $regex: searchQuery, $options: "i" } }, 
+        { tag: { $regex: searchQuery, $options: "i" } },
       ],
     })
-      .populate("user", "name ") 
+      .populate("user", "name profilePictureUrl")
+      .populate("category", "name ") 
       .sort({ date: -1 }) 
       .limit(limit);
     res.json({ success: true, notes: notes });
   } catch (err) {
-    console.error(err.message);
-    res.status(500).send("Internal Server Error");
-  }
-});
-router.get("/types", async (req, res) => {
-  try {
-    const types = await Note.distinct("type");
-    const validTypes = types.filter((type) => type);
-    res.json({ success: true, types: validTypes });
-  } catch (err) {
-    console.error(err.message);
+    console.error("Search Error:", err.message);
     res.status(500).send("Internal Server Error");
   }
 });
 router.get("/recent", async (req, res) => {
   try {
-    const limit = parseInt(req.query.limit) || 5; 
+    const limit = parseInt(req.query.limit) || 5;
     const recentNotes = await Note.find({})
-      .sort({ date: -1 }) 
+      .sort({ date: -1 })
       .limit(limit)
-      .select("title _id date slug type tag"); 
+      .select("title _id date slug category tag") 
+      .populate("category", "name "); 
     res.json({ success: true, notes: recentNotes });
   } catch (err) {
     console.error(err.message);
     res.status(500).send("Internal Server Error");
   }
 });
+router.get("/by-category/:categoryId", async (req, res) => {
+  try {
+    const { categoryId } = req.params;
+    const { lastId } = req.query;
+    const limit = parseInt(req.query.limit) || 9; 
+    if (!mongoose.Types.ObjectId.isValid(categoryId)) {
+      return res
+        .status(400)
+        .json({ success: false, error: "Invalid Category ID format" });
+    }
+    const category = await Category.findById(categoryId).select("_id name"); 
+    if (!category) {
+      return res
+        .status(404)
+        .json({ success: false, error: "Category not found" });
+    }
+    let query = { category: category._id };
+    if (lastId) {
+      if (!mongoose.Types.ObjectId.isValid(lastId)) {
+        return res
+          .status(400)
+          .json({ success: false, error: "Invalid lastId format" });
+      }
+      query._id = { $lt: lastId };
+    }
+    const notes = await Note.find(query)
+      .sort({ _id: -1 }) 
+      .limit(limit)
+      .populate("user", "name profilePictureUrl") 
+      .populate("category", "name"); 
+    const nextLastId = notes.length > 0 ? notes[notes.length - 1]._id : null;
+    let hasMore = false;
+    if (nextLastId) {
+      const remainingCount = await Note.countDocuments({
+        category: category._id, 
+        _id: { $lt: nextLastId },
+      });
+      hasMore = remainingCount > 0;
+    }
+    console.log(
+      `Category ${categoryId} Notes: Fetched ${notes.length}, HasMore: ${hasMore}, NextLastId: ${nextLastId}`,
+    );
+    res.json({
+      success: true,
+      notes,
+      category: { name: category.name, _id: category._id }, 
+      hasMore,
+      nextLastId,
+    });
+  } catch (error) {
+    console.error("Error fetching notes by category:", error);
+    res.status(500).json({
+      success: false,
+      error: "Server Error fetching notes by category",
+    });
+  }
+});
 module.exports = router;
+
+// FILE: setup_initial_categories.js
+require("dotenv").config({ path: "./config.env" });
+const mongoose = require("mongoose");
+const Category = require("./models/Category"); 
+const mongoURI = process.env.DATABASE;
+const initialCategories = [
+  {
+    name: "JavaScript",
+    description: "Posts related to JavaScript programming.",
+  },
+  {
+    name: "Salesforce",
+    description: "Posts about Salesforce CRM and platform.",
+  },
+  { name: "Sociology", description: "Posts related to sociological topics." },
+  {
+    name: "Life",
+    description: "Posts about life experiences and reflections.",
+  },
+  { name: "Technology", description: "General technology posts." },
+  {
+    name: "Creative",
+    description: "Posts about creative projects or processes.",
+  },
+  { name: "Tutorial", description: "How-to guides and tutorials." },
+  { name: "News", description: "News related updates." },
+];
+async function setupCategories() {
+  console.log("Connecting to MongoDB...");
+  await mongoose.connect(mongoURI);
+  console.log("Connected to MongoDB successfully.");
+  let createdCount = 0;
+  let skippedCount = 0;
+  try {
+    console.log("Attempting to create initial categories...");
+    for (const catData of initialCategories) {
+      const existing = await Category.findOne({
+        name: { $regex: `^${catData.name}$`, $options: "i" },
+      }); 
+      if (existing) {
+        console.log(`Category "${catData.name}" already exists. Skipping.`);
+        skippedCount++;
+      } else {
+        const newCategory = new Category(catData);
+        await newCategory.save();
+        console.log(`Created category: "${newCategory.name}"`);
+        createdCount++;
+      }
+    }
+    console.log("--- Initial Category Setup Summary ---");
+    console.log(`Created: ${createdCount}`);
+    console.log(`Skipped (already existed): ${skippedCount}`);
+  } catch (error) {
+    console.error("An error occurred during category setup:", error);
+  } finally {
+    console.log("Disconnecting from MongoDB...");
+    await mongoose.disconnect();
+    console.log("Disconnected.");
+  }
+}
+setupCategories();
