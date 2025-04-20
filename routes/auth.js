@@ -80,7 +80,7 @@ router.post(
       success = true;
       res.json({ success, authtoken });
     } catch (error) {
-      console.error(error.message);
+      console.error("Error in /createuser:", error);
       res.status(500).send("Internal Server Error");
     }
   },
@@ -103,7 +103,7 @@ router.post(
 
     const { email, password } = req.body;
     try {
-      let user = await User.findOne({ email });
+      let user = await User.findOne({ email }).select("+password");
       if (!user) {
         success = false;
         return res
@@ -131,7 +131,7 @@ router.post(
       success = true;
       res.json({ success, authtoken });
     } catch (error) {
-      console.error(error.message);
+      console.error("Error in /login:", error);
       res.status(500).send("Internal Server Error");
     }
   },

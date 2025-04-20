@@ -7,6 +7,7 @@ const Note = require("../models/Note");
 const { body, validationResult } = require("express-validator");
 const mongoose = require("mongoose");
 var restrictToOwnerOrAdmin = require("../middleware/restrictToOwnerOrAdmin");
+const slugify = require("slugify");
 
 // ... (fetchNotesIrrespective/:id, fetchNotesIrrespective, fetchallnotes, fetchNotesIrrespectiveByType/:type remain the same) ...
 // GET a specific note irrespective of user
@@ -25,6 +26,31 @@ router.get("/fetchNotesIrrespective/:id", async (req, res) => {
     res.status(200).json(note);
   } catch (err) {
     console.error(err.message);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+// --- NEW ROUTE: Fetch a single note by its SLUG ---
+router.get("/fetchNoteBySlug/:slug", async (req, res) => {
+  try {
+    const slug = req.params.slug;
+    // Find the note by the unique slug field
+    const note = await Note.findOne({ slug: slug }).populate(
+      "user",
+      "name _id role profilePictureUrl",
+    ); // Populate user details
+
+    if (!note) {
+      console.warn(`Note not found with slug: ${slug}`);
+      return res.status(404).json({ error: "Note not found" }); // Use generic error for public
+    }
+    console.log(`Note found by slug ${slug}: ${note.title}`);
+    res.status(200).json(note);
+  } catch (err) {
+    console.error("Error fetching note by slug:", err.message);
+    if (err instanceof mongoose.Error.CastError) {
+      return res.status(400).json({ error: "Invalid slug format" });
+    }
     res.status(500).json({ error: "Internal Server Error" });
   }
 });
@@ -104,76 +130,155 @@ router.get("/fetchNotesIrrespectiveByType/:type", async (req, res) => {
 // POST Add a new Note using: POST "/api/notes/addnote". Login required
 router.post(
   "/addnote",
-  fetchuser,
+  fetchuser, // Middleware to authenticate user and get req.user.id
   [
+    // Validation middleware array
+    // Validate title: required, minimum 3 characters
     body("title", "Enter a valid title").isLength({ min: 3 }),
+
+    // Validate description: required, minimum 5 characters
     body("description", "description must be atleast 5 characters").isLength({
       min: 5,
     }),
-    body("type").isIn([
-      "JavaScript",
-      "Salesforce",
-      "Sociology",
-      "Life",
-      "Technology",
-      "Creative",
-      "Tutorial",
-      "News",
-    ]),
-    body("tag").optional(),
+
+    // Validate type: required, must be one of the allowed enum values from the Note model
+    body("type")
+      .isIn([
+        // *** THIS IS THE CORRECTED LIST ***
+        "JavaScript",
+        "Salesforce",
+        "Sociology",
+        "Life",
+        "Technology",
+        "Creative",
+        "Tutorial",
+        "News",
+      ])
+      .withMessage("Invalid note type selected."), // Optional: specific error message
+
+    // Validate tag: optional string
+    body("tag").optional().isString(),
+
+    // Validate isFeatured: optional boolean
     body("isFeatured").optional().isBoolean(),
   ],
   async (req, res) => {
     try {
+      // Check for validation errors
       const errors = validationResult(req);
       if (!errors.isEmpty()) {
+        // Log validation errors for easier debugging on the server
+        console.error(
+          "Validation errors in /addnote:",
+          JSON.stringify(errors.array()),
+        );
         return res.status(400).json({ errors: errors.array() });
       }
 
-      // Check user role
+      // Fetch the requesting user's details (role needed for isFeatured logic)
       const requestingUser = await User.findById(req.user.id).select(
-        "role email",
+        "role email", // Select only necessary fields
       );
-      if (!requestingUser)
-        return res.status(401).send({ error: "User not found." });
+      if (!requestingUser) {
+        // This case should ideally be caught by fetchuser, but good to double-check
+        return res
+          .status(401)
+          .send({ error: "User not found or invalid token." });
+      }
 
+      // Destructure data from the request body
       const { title, description, tag, type } = req.body;
-      let isFeatured = req.body.isFeatured || false; // Default to false
+      let isFeatured = req.body.isFeatured || false; // Default isFeatured to false if not provided
 
-      // --- Role Check Logic for isFeatured ---
+      // Security Check: Only allow admins to set isFeatured to true
       if (isFeatured && requestingUser.role !== "admin") {
         console.warn(
-          `User ${requestingUser.email} (role: ${requestingUser.role}) attempted to set isFeatured=true on add. Forcing to false.`,
+          `User ${requestingUser.email || req.user.id} (role: ${
+            requestingUser.role
+          }) attempted to set isFeatured=true on add. Forcing to false.`,
         );
-        isFeatured = false; // Force to false if not admin
+        isFeatured = false; // Override if a non-admin tries to set it
       }
-      // --- End Role Check ---
 
-      // Calculate readTimeMinutes on the server
-      const words = description.split(/\s+/).filter(Boolean).length; // Filter empty strings
-      const wordsPerMinute = 200; // Adjust as needed
-      const readTimeMinutes = Math.max(1, Math.ceil(words / wordsPerMinute)); // Ensure at least 1 min
-
-      const note = new Note({
-        title,
-        description,
-        tag,
-        type,
-        isFeatured, // Use the potentially adjusted value
-        readTimeMinutes, // Use server-calculated value
-        user: req.user.id,
+      // --- Slug Generation ---
+      // Generate a base slug from the title
+      let baseSlug = slugify(title, {
+        lower: true, // convert to lower case
+        strict: true, // strip special characters except -
+        remove: /[*+~.()'"!:@]/g, // remove specified characters
       });
 
+      // Handle empty or invalid slugs (e.g., title was only symbols)
+      if (!baseSlug) {
+        baseSlug = `note-${Date.now()}`; // Fallback slug
+      }
+
+      let slug = baseSlug;
+      let counter = 1;
+      let existingNote = await Note.findOne({ slug: slug }); // Check if slug already exists
+
+      // Handle slug collisions by appending a counter
+      while (existingNote) {
+        counter++;
+        slug = `${baseSlug}-${counter}`;
+        console.log(
+          `Slug collision detected for '${baseSlug}'. Trying new slug: ${slug}`,
+        );
+        existingNote = await Note.findOne({ slug: slug }); // Check again with the new slug
+      }
+      console.log(`Final generated slug for note '${title}': ${slug}`);
+      // --- End Slug Generation ---
+
+      // --- Read Time Calculation ---
+      // Simple word count based estimation
+      const words = description.split(/\s+/).filter(Boolean).length; // Split by whitespace, remove empty strings
+      const wordsPerMinute = 200; // Average reading speed
+      const readTimeMinutes = Math.max(1, Math.ceil(words / wordsPerMinute)); // Ensure at least 1 min
+      // --- End Read Time Calculation ---
+
+      // Create a new Note instance using the Mongoose model
+      const note = new Note({
+        title,
+        slug, // Use the generated unique slug
+        description,
+        tag: tag || "General", // Default tag if not provided
+        type, // Use the validated type
+        isFeatured, // Use the (potentially overridden) isFeatured value
+        readTimeMinutes, // Add calculated read time
+        user: req.user.id, // Associate the note with the logged-in user
+        // 'date' will default to Date.now as per the schema
+      });
+
+      // Save the new note to the database
       const savedNote = await note.save();
-      // Populate user details for the response
+
+      // Populate the user field in the saved note before sending the response
+      // This adds the user's name/email to the response object automatically
       const populatedNote = await Note.findById(savedNote._id).populate(
-        "user",
-        "name ", // Populate needed fields
+        "user", // Field to populate
+        "name email", // Fields to select from the User model
       );
 
-      res.json(populatedNote);
+      // Send the successfully saved (and populated) note back to the client
+      res.status(201).json(populatedNote); // Use 201 Created status code
     } catch (error) {
-      console.error("Error in /addnote:", error.message);
+      console.error("Error in /addnote route:", error.message);
+
+      // Handle potential database errors (e.g., duplicate key error if slug generation failed unexpectedly)
+      if (error.code === 11000 && error.keyPattern && error.keyPattern.slug) {
+        return res.status(409).json({
+          // 409 Conflict might be more appropriate here
+          errors: [
+            {
+              msg: "A note with a very similar title already exists, resulting in a duplicate URL slug. Please modify the title slightly.",
+              param: "title", // Indicate which field likely caused the issue
+              location: "body",
+            },
+          ],
+        });
+      }
+
+      // Generic server error for other issues
       res.status(500).send("Internal Server Error");
     }
   },
@@ -459,7 +564,7 @@ router.get("/recent", async (req, res) => {
     const recentNotes = await Note.find({})
       .sort({ date: -1 }) // Sort by most recent
       .limit(limit)
-      .select("title _id date"); // Select only needed fields
+      .select("title _id date slug type tag"); // Select only needed fields
     res.json({ success: true, notes: recentNotes });
   } catch (err) {
     console.error(err.message);

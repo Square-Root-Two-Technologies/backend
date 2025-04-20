@@ -55,8 +55,7 @@ const UserSchema = new Schema({
   googleId: {
     type: String,
     unique: true, // Ensure only one user per Google ID
-    sparse: true, // Allows multiple documents to have null/no value for this field
-    default: null,
+    sparse: true,
   },
 });
 

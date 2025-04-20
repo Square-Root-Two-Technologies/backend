@@ -46,6 +46,12 @@ const NotesSchema = new Schema({
     default: false,
     index: true,
   },
+  slug: {
+    type: String,
+    required: true,
+    unique: true, // Ensures slugs are unique across all notes
+    index: true, // Improves database query performance when finding by slug
+  },
 });
 
 module.exports = mongoose.model("notes", NotesSchema);
