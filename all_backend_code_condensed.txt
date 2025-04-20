@@ -13,11 +13,11 @@
     "upload.js": true
   },
   "models": {
+    "Category.js": true,
     "Note.js": true,
     "User.js": true
   },
   "package.json": true,
-  "populateTestData.js": true,
   "routes": {
     "auth.js": true,
     "notes.js": true
@@ -162,6 +162,31 @@ const upload = multer({
 });
 module.exports = upload;
 
+// FILE: models/Category.js
+const mongoose = require("mongoose");
+const { Schema } = mongoose;
+const CategorySchema = new Schema({
+  name: {
+    type: String,
+    required: true,
+  },
+  parent: {
+    type: Schema.Types.ObjectId,
+    ref: "Category",
+    default: null, 
+  },
+  slug: {
+    type: String,
+    required: true,
+    unique: true, 
+  },
+  description: {
+    type: String,
+  },
+});
+CategorySchema.index({ parent: 1, name: 1 }, { unique: true });
+const Category = mongoose.model("Category", CategorySchema);
+
 // FILE: models/Note.js
 const mongoose = require("mongoose");
 const { Schema } = mongoose;
@@ -208,6 +233,12 @@ const NotesSchema = new Schema({
     type: Boolean,
     default: false,
     index: true,
+  },
+  slug: {
+    type: String,
+    required: true,
+    unique: true, 
+    index: true, 
   },
 });
 module.exports = mongoose.model("notes", NotesSchema);
@@ -268,8 +299,7 @@ const UserSchema = new Schema({
   googleId: {
     type: String,
     unique: true, 
-    sparse: true, 
-    default: null,
+    sparse: true,
   },
 });
 UserSchema.methods.toJSON = function () {
@@ -281,144 +311,7 @@ const User = mongoose.model("user", UserSchema);
 module.exports = User;
 
 // FILE: package.json
-{"name":"squareroorwo_backend","version":"1.0.0","description":"Square Root Two Technologies","main":"index.js","scripts":{"test":"echo \"Error: no test specified\" && exit 1","start":"node index.js"},"author":"","license":"ISC","dependencies":{"bcryptjs":"^2.4.3","cloudinary":"^2.6.0","cors":"^2.8.5","dotenv":"^16.5.0","express":"^4.17.1","express-validator":"^6.12.1","google-auth-library":"^9.15.1","jsonwebtoken":"^9.0.0","lorem-ipsum":"^2.0.8","mongoose":"^6.13.8","multer":"^1.4.5-lts.2"},"devDependencies":{"nodemon":"^2.0.12"}}
-
-// FILE: populateTestData.js
-const mongoose = require("mongoose");
-const bcrypt = require("bcryptjs");
-const { LoremIpsum } = require("lorem-ipsum");
-const connectToMongo = require("./db"); 
-const User = require("./models/User");
-const Note = require("./models/Note");
-connectToMongo();
-const lorem = new LoremIpsum({
-  sentencesPerParagraph: { max: 8, min: 4 },
-  wordsPerSentence: { max: 16, min: 4 },
-});
-const noteTypes = [
-  "JavaScript",
-  "Salesforce",
-  "Sociology",
-  "Life",
-  "Technology",
-  "Creative",
-  "Tutorial",
-  "News",
-];
-const testUsers = [
-  {
-    name: "Admin User",
-    email: "admin@example.com",
-    password: "admin123",
-    country: "USA",
-    city: "New York",
-    about: "I am the admin.",
-    role: "admin",
-  },
-  {
-    name: "John Doe",
-    email: "john.doe@example.com",
-    password: "password123",
-    country: "Canada",
-    city: "Toronto",
-    about: "Just a regular user.",
-    role: "user",
-  },
-  {
-    name: "Jane Smith",
-    email: "jane.smith@example.com",
-    password: "password123",
-    country: "UK",
-    city: "London",
-    about: "Loves writing notes.",
-    role: "user",
-  },
-  {
-    name: "Alice Johnson",
-    email: "alice.j@example.com",
-    password: "password123",
-    country: "Australia",
-    city: "Sydney",
-    about: "Tech enthusiast.",
-    role: "user",
-  },
-  {
-    name: "Bob Brown",
-    email: "bob.brown@example.com",
-    password: "password123",
-    country: "Germany",
-    city: "Berlin",
-    about: "Creative writer.",
-    role: "user",
-  },
-];
-async function createTestUsers() {
-  try {
-    await User.deleteMany({}); 
-    const users = [];
-    for (const userData of testUsers) {
-      const salt = await bcrypt.genSalt(10);
-      const secPass = await bcrypt.hash(userData.password, salt);
-      const user = await User.create({
-        name: userData.name,
-        email: userData.email,
-        password: secPass,
-        country: userData.country,
-        city: userData.city,
-        about: userData.about,
-        role: userData.role,
-      });
-      users.push(user);
-      console.log(`Created user: ${user.name}`);
-    }
-    return users;
-  } catch (error) {
-    console.error("Error creating users:", error);
-    process.exit(1);
-  }
-}
-async function createTestNotes(users) {
-  try {
-    await Note.deleteMany({}); 
-    const notesCount = 100;
-    for (let i = 0; i < notesCount; i++) {
-      const user = users[Math.floor(Math.random() * users.length)]; 
-      const type = noteTypes[Math.floor(Math.random() * noteTypes.length)]; 
-      const title = lorem.generateWords(3); 
-      const description = lorem.generateParagraphs(2); 
-      const tag = lorem.generateWords(1); 
-      const isFeatured = user.role === "admin" && Math.random() < 0.2; 
-      const words = description.split(/\s+/).filter(Boolean).length;
-      const readTimeMinutes = Math.max(1, Math.ceil(words / 200));
-      const note = await Note.create({
-        user: user._id,
-        title: `${type} Note: ${title}`,
-        description,
-        tag,
-        type,
-        isFeatured,
-        readTimeMinutes,
-      });
-      console.log(`Created note ${i + 1}/${notesCount}: ${note.title}`);
-    }
-  } catch (error) {
-    console.error("Error creating notes:", error);
-    process.exit(1);
-  }
-}
-async function main() {
-  try {
-    const users = await createTestUsers();
-    await createTestNotes(users);
-    console.log("Test data population completed!");
-  } catch (error) {
-    console.error("Error in main:", error);
-  } finally {
-    mongoose.connection.close();
-    console.log("Database connection closed.");
-  }
-}
-main();
+{"name":"squareroorwo_backend","version":"1.0.0","description":"Square Root Two Technologies","main":"index.js","scripts":{"test":"echo \"Error: no test specified\" && exit 1","start":"node index.js"},"author":"","license":"ISC","dependencies":{"bcryptjs":"^2.4.3","cloudinary":"^2.6.0","cors":"^2.8.5","dotenv":"^16.5.0","express":"^4.17.1","express-validator":"^6.12.1","google-auth-library":"^9.15.1","jsonwebtoken":"^9.0.0","lorem-ipsum":"^2.0.8","mongoose":"^6.13.8","multer":"^1.4.5-lts.2","slugify":"^1.6.6"},"devDependencies":{"nodemon":"^2.0.12"}}
 
 // FILE: routes/auth.js
 const express = require("express");
@@ -490,7 +383,7 @@ router.post(
       success = true;
       res.json({ success, authtoken });
     } catch (error) {
-      console.error(error.message);
+      console.error("Error in /createuser:", error);
       res.status(500).send("Internal Server Error");
     }
   },
@@ -509,7 +402,7 @@ router.post(
     }
     const { email, password } = req.body;
     try {
-      let user = await User.findOne({ email });
+      let user = await User.findOne({ email }).select("+password");
       if (!user) {
         success = false;
         return res
@@ -535,7 +428,7 @@ router.post(
       success = true;
       res.json({ success, authtoken });
     } catch (error) {
-      console.error(error.message);
+      console.error("Error in /login:", error);
       res.status(500).send("Internal Server Error");
     }
   },
@@ -773,6 +666,7 @@ const Note = require("../models/Note");
 const { body, validationResult } = require("express-validator");
 const mongoose = require("mongoose");
 var restrictToOwnerOrAdmin = require("../middleware/restrictToOwnerOrAdmin");
+const slugify = require("slugify");
 router.get("/fetchNotesIrrespective/:id", async (req, res) => {
   try {
     const id = req.params.id;
@@ -786,6 +680,27 @@ router.get("/fetchNotesIrrespective/:id", async (req, res) => {
     res.status(200).json(note);
   } catch (err) {
     console.error(err.message);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+router.get("/fetchNoteBySlug/:slug", async (req, res) => {
+  try {
+    const slug = req.params.slug;
+    const note = await Note.findOne({ slug: slug }).populate(
+      "user",
+      "name _id role profilePictureUrl",
+    ); 
+    if (!note) {
+      console.warn(`Note not found with slug: ${slug}`);
+      return res.status(404).json({ error: "Note not found" }); 
+    }
+    console.log(`Note found by slug ${slug}: ${note.title}`);
+    res.status(200).json(note);
+  } catch (err) {
+    console.error("Error fetching note by slug:", err.message);
+    if (err instanceof mongoose.Error.CastError) {
+      return res.status(400).json({ error: "Invalid slug format" });
+    }
     res.status(500).json({ error: "Internal Server Error" });
   }
 });
@@ -854,64 +769,107 @@ router.get("/fetchNotesIrrespectiveByType/:type", async (req, res) => {
 });
 router.post(
   "/addnote",
-  fetchuser,
+  fetchuser, 
   [
     body("title", "Enter a valid title").isLength({ min: 3 }),
     body("description", "description must be atleast 5 characters").isLength({
       min: 5,
     }),
-    body("type").isIn([
-      "JavaScript",
-      "Salesforce",
-      "Sociology",
-      "Life",
-      "Technology",
-      "Creative",
-      "Tutorial",
-      "News",
-    ]),
-    body("tag").optional(),
+    body("type")
+      .isIn([
+        "JavaScript",
+        "Salesforce",
+        "Sociology",
+        "Life",
+        "Technology",
+        "Creative",
+        "Tutorial",
+        "News",
+      ])
+      .withMessage("Invalid note type selected."), 
+    body("tag").optional().isString(),
     body("isFeatured").optional().isBoolean(),
   ],
   async (req, res) => {
     try {
       const errors = validationResult(req);
       if (!errors.isEmpty()) {
+        console.error(
+          "Validation errors in /addnote:",
+          JSON.stringify(errors.array()),
+        );
         return res.status(400).json({ errors: errors.array() });
       }
       const requestingUser = await User.findById(req.user.id).select(
-        "role email",
+        "role email", 
       );
-      if (!requestingUser)
-        return res.status(401).send({ error: "User not found." });
+      if (!requestingUser) {
+        return res
+          .status(401)
+          .send({ error: "User not found or invalid token." });
+      }
       const { title, description, tag, type } = req.body;
       let isFeatured = req.body.isFeatured || false; 
       if (isFeatured && requestingUser.role !== "admin") {
         console.warn(
-          `User ${requestingUser.email} (role: ${requestingUser.role}) attempted to set isFeatured=true on add. Forcing to false.`,
+          `User ${requestingUser.email || req.user.id} (role: ${
+            requestingUser.role
+          }) attempted to set isFeatured=true on add. Forcing to false.`,
         );
         isFeatured = false; 
       }
+      let baseSlug = slugify(title, {
+        lower: true, 
+        strict: true, 
+        remove: /[*+~.()'"!:@]/g, 
+      });
+      if (!baseSlug) {
+        baseSlug = `note-${Date.now()}`; 
+      }
+      let slug = baseSlug;
+      let counter = 1;
+      let existingNote = await Note.findOne({ slug: slug }); 
+      while (existingNote) {
+        counter++;
+        slug = `${baseSlug}-${counter}`;
+        console.log(
+          `Slug collision detected for '${baseSlug}'. Trying new slug: ${slug}`,
+        );
+        existingNote = await Note.findOne({ slug: slug }); 
+      }
+      console.log(`Final generated slug for note '${title}': ${slug}`);
       const words = description.split(/\s+/).filter(Boolean).length; 
       const wordsPerMinute = 200; 
       const readTimeMinutes = Math.max(1, Math.ceil(words / wordsPerMinute)); 
       const note = new Note({
         title,
+        slug, 
         description,
-        tag,
-        type,
+        tag: tag || "General", 
+        type, 
         isFeatured, 
         readTimeMinutes, 
-        user: req.user.id,
+        user: req.user.id, 
       });
       const savedNote = await note.save();
       const populatedNote = await Note.findById(savedNote._id).populate(
-        "user",
-        "name ", 
+        "user", 
+        "name email", 
       );
-      res.json(populatedNote);
+      res.status(201).json(populatedNote); 
     } catch (error) {
-      console.error("Error in /addnote:", error.message);
+      console.error("Error in /addnote route:", error.message);
+      if (error.code === 11000 && error.keyPattern && error.keyPattern.slug) {
+        return res.status(409).json({
+          errors: [
+            {
+              msg: "A note with a very similar title already exists, resulting in a duplicate URL slug. Please modify the title slightly.",
+              param: "title", 
+              location: "body",
+            },
+          ],
+        });
+      }
       res.status(500).send("Internal Server Error");
     }
   },
@@ -1148,7 +1106,7 @@ router.get("/recent", async (req, res) => {
     const recentNotes = await Note.find({})
       .sort({ date: -1 }) 
       .limit(limit)
-      .select("title _id date"); 
+      .select("title _id date slug type tag"); 
     res.json({ success: true, notes: recentNotes });
   } catch (err) {
     console.error(err.message);
