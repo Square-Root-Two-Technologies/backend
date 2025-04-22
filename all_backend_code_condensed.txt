@@ -1,6 +1,9 @@
 // --- File Structure ---
 {
   "app.yaml": true,
+  "automation": {
+    "scheduler.js": true
+  },
   "config": {
     "cloudinary.js": true
   },
@@ -10,12 +13,14 @@
   "middleware": {
     "fetchuser.js": true,
     "isAdmin.js": true,
+    "isSuperAdmin.js": true,
     "restrictToOwnerOrAdmin.js": true,
     "upload.js": true
   },
   "migration_add_categories.js": true,
   "models": {
     "Category.js": true,
+    "ConsultationRequest.js": true,
     "Note.js": true,
     "User.js": true
   },
@@ -24,6 +29,7 @@
   "routes": {
     "auth.js": true,
     "categories.js": true,
+    "contact.js": true,
     "notes.js": true
   },
   "setup_initial_categories.js": true
@@ -44,6 +50,109 @@ network:
   forwarded_ports:
     - 5000
 
+// FILE: automation/scheduler.js
+const cron = require("node-cron");
+const nodemailer = require("nodemailer");
+const User = require("../models/User"); 
+const ConsultationRequest = require("../models/ConsultationRequest"); 
+require("dotenv").config({ path: "./config.env" }); 
+const transporter = nodemailer.createTransport({
+  host: process.env.MAILJET_HOST || "in-v3.mailjet.com",
+  port: parseInt(process.env.MAILJET_PORT || "587", 10),
+  secure: (process.env.MAILJET_PORT || "587") === "465",
+  auth: {
+    user: process.env.MAILJET_API_KEY, 
+    pass: process.env.MAILJET_SECRET_KEY, 
+  },
+});
+transporter.verify(function (error, success) {
+  if (error) {
+    console.error("[Scheduler] Nodemailer configuration error:", error);
+  } else {
+    console.log("[Scheduler] Nodemailer transporter verified successfully.");
+  }
+});
+const sendHourlyConsultationSummary = async () => {
+  console.log(
+    `[${new Date().toISOString()}] Running hourly consultation request email job...`,
+  );
+  try {
+    const newRequests = await ConsultationRequest.find({
+      emailedInBatch: false,
+    }).sort({ createdAt: 1 });
+    if (newRequests.length === 0) {
+      console.log("[Scheduler] No new consultation requests to email.");
+      return;
+    }
+    console.log(`[Scheduler] Found ${newRequests.length} new request(s).`);
+    const superAdmins = await User.find({ role: "SuperAdmin" }).select("email");
+    const adminEmails = superAdmins.map((admin) => admin.email);
+    if (adminEmails.length === 0) {
+      console.warn(
+        "[Scheduler] No SuperAdmin users found. Cannot send batch email.",
+      );
+      return; 
+    }
+    console.log(
+      `[Scheduler] Sending batch email to: ${adminEmails.join(", ")}`,
+    );
+    let emailHtml = `<h1>Hourly Consultation Requests Summary</h1>`;
+    emailHtml += `<p>Received ${newRequests.length} new request(s) since the last summary:</p>`; 
+    emailHtml += "<ul>";
+    newRequests.forEach((req) => {
+      emailHtml += `
+              <li style="margin-bottom: 15px; border-bottom: 1px solid #eee; padding-bottom: 10px;">
+                  <strong>Name:</strong> ${req.name}<br/>
+                  <strong>Email:</strong> ${req.email}<br/>
+                  ${
+                    req.company
+                      ? `<strong>Company:</strong> ${req.company}<br/>`
+                      : ""
+                  }
+                  <strong>Received:</strong> ${req.createdAt.toLocaleString(
+                    "en-IN",
+                    { timeZone: "Asia/Kolkata" },
+                  )}<br/>
+                  <strong>Message:</strong><br/>
+                  <p style="white-space: pre-wrap; background-color: #f9f9f9; padding: 5px;">${
+                    req.message
+                  }</p>
+              </li>
+          `;
+    });
+    emailHtml += "</ul>";
+    emailHtml += `<p>Please log in to the dashboard to manage these requests.</p>`;
+    const mailOptions = {
+      from: `"Website Notifications" <${process.env.MAILJET_SENDER_EMAIL}>`,
+      to: adminEmails.join(", "),
+      subject: `[${newRequests.length}] New Consultation Request(s) - Hourly Summary`,
+      html: emailHtml,
+    };
+    await transporter.sendMail(mailOptions);
+    console.log("[Scheduler] Batch email sent successfully.");
+    const requestIds = newRequests.map((req) => req._id);
+    await ConsultationRequest.updateMany(
+      { _id: { $in: requestIds } },
+      { $set: { emailedInBatch: true } },
+    );
+    console.log(`[Scheduler] Marked ${requestIds.length} requests as emailed.`);
+  } catch (error) {
+    console.error("[Scheduler] Hourly job error:", error);
+  }
+};
+const startScheduledJobs = () => {
+  cron.schedule(
+    "0 * * * *", 
+    sendHourlyConsultationSummary,
+    {
+      scheduled: true,
+      timezone: "Asia/Kolkata", 
+    },
+  );
+  console.log("[Scheduler] Hourly consultation summary job scheduled.");
+};
+module.exports = { startScheduledJobs }; 
+
 // FILE: config.env
 DATABASE = mongodb+srv://tanvirraihanislam2020:HBvqo4zAq5WwUqCZ@website2025.vgtt4.mongodb.net/?retryWrites=true&w=majority&appName=Website2025
 JWT_SECRET = Harryisagoodb$oy
@@ -56,6 +165,12 @@ CLOUDINARY_API_SECRET=HNxI_x85m4Gu0-xYVaYo0DBv1qI
 REACT_APP_GOOGLE_CLIENT_ID = 344045907409-pm7dp05kuvtckvepnh064r4bnfujrj6d.apps.googleusercontent.com
 
 GOOGLE_CLIENT_ID = 344045907409-pm7dp05kuvtckvepnh064r4bnfujrj6d.apps.googleusercontent.com
+
+MAILJET_API_KEY=91b60151af7e6984348c8d3f04dbeec7
+
+MAILJET_SECRET_KEY=e34c1bdba78d119c72d81038457c03e2
+
+MAILJET_SENDER_EMAIL = 2024.tri.squareroottwo@gmail.com
 
 // FILE: config/cloudinary.js
 const cloudinary = require("cloudinary").v2;
@@ -93,14 +208,17 @@ require("dotenv").config({ path: "./config.env" });
 const connectToMongo = require("./db");
 const express = require("express");
 var cors = require("cors");
+const { startScheduledJobs } = require("./automation/scheduler");
 connectToMongo();
 const app = express();
-const port = 5000;
+const port = process.env.PORT || 5000;
 app.use(cors());
 app.use(express.json());
 app.use("/api/auth", require("./routes/auth"));
 app.use("/api/notes", require("./routes/notes"));
 app.use("/api/categories", require("./routes/categories"));
+app.use("/api/contact", require("./routes/contact"));
+startScheduledJobs();
 app.listen(port, () => {
   console.log(`squareroottwo backend listening at http://localhost:${port}`);
 });
@@ -158,6 +276,39 @@ const isAdmin = async (req, res, next) => {
   }
 };
 module.exports = isAdmin;
+
+// FILE: middleware/isSuperAdmin.js
+const User = require("../models/User");
+const isSuperAdmin = async (req, res, next) => {
+  if (!req.user || !req.user.id) {
+    return res
+      .status(401)
+      .json({ success: false, error: "Authentication required." });
+  }
+  try {
+    const user = await User.findById(req.user.id).select("role email"); 
+    if (!user) {
+      return res.status(401).json({ success: false, error: "User not found." });
+    }
+    if (user.role !== "SuperAdmin") {
+      console.warn(
+        `Access denied for user ${user.email} (Role: ${user.role}) to SuperAdmin route.`,
+      );
+      return res.status(403).json({
+        success: false,
+        error: "Forbidden: SuperAdmin access required.",
+      });
+    }
+    req.requestingUserRole = user.role;
+    next(); 
+  } catch (error) {
+    console.error("Error in isSuperAdmin middleware:", error);
+    res
+      .status(500)
+      .json({ success: false, error: "Server error checking user role." });
+  }
+};
+module.exports = isSuperAdmin;
 
 // FILE: middleware/restrictToOwnerOrAdmin.js
 const mongoose = require("mongoose");
@@ -352,6 +503,57 @@ CategorySchema.index({ parent: 1, name: 1 }, { unique: true });
 const Category = mongoose.model("Category", CategorySchema);
 module.exports = Category;
 
+// FILE: models/ConsultationRequest.js
+const mongoose = require("mongoose");
+const { Schema } = mongoose;
+const consultationRequestSchema = new Schema(
+  {
+    name: {
+      type: String,
+      required: [true, "Name is required."],
+      trim: true,
+      minlength: 2,
+    },
+    email: {
+      type: String,
+      required: [true, "Email is required."],
+      trim: true,
+      lowercase: true,
+      match: [/\S+@\S+\.\S+/, "Please enter a valid email address."],
+    },
+    company: {
+      type: String,
+      trim: true,
+      default: null, 
+    },
+    message: {
+      type: String,
+      required: [true, "Message is required."],
+      trim: true,
+      minlength: 10, 
+    },
+    status: {
+      type: String,
+      enum: ["New", "Contacted", "Closed", "Archived"],
+      default: "New",
+      index: true,
+    },
+    emailedInBatch: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+  },
+  {
+    timestamps: true, 
+  },
+);
+const ConsultationRequest = mongoose.model(
+  "ConsultationRequest",
+  consultationRequestSchema,
+);
+module.exports = ConsultationRequest;
+
 // FILE: models/Note.js
 const mongoose = require("mongoose");
 const { Schema } = mongoose;
@@ -485,7 +687,7 @@ const User = mongoose.model("user", UserSchema);
 module.exports = User;
 
 // FILE: package.json
-{"name":"squareroorwo_backend","version":"1.0.0","description":"Square Root Two Technologies","main":"index.js","scripts":{"test":"echo \"Error: no test specified\" && exit 1","start":"node index.js"},"author":"","license":"ISC","dependencies":{"bcryptjs":"^2.4.3","cloudinary":"^2.6.0","cors":"^2.8.5","dotenv":"^16.5.0","express":"^4.17.1","express-validator":"^6.12.1","google-auth-library":"^9.15.1","jsonwebtoken":"^9.0.0","lorem-ipsum":"^2.0.8","mongoose":"^6.13.8","multer":"^1.4.5-lts.2","slugify":"^1.6.6"},"devDependencies":{"nodemon":"^2.0.12"}}
+{"name":"squareroorwo_backend","version":"1.0.0","description":"Square Root Two Technologies","main":"index.js","scripts":{"test":"echo \"Error: no test specified\" && exit 1","start":"node index.js"},"author":"","license":"ISC","dependencies":{"bcryptjs":"^2.4.3","cloudinary":"^2.6.0","cors":"^2.8.5","dotenv":"^16.5.0","express":"^4.17.1","express-validator":"^6.12.1","google-auth-library":"^9.15.1","jsonwebtoken":"^9.0.0","lorem-ipsum":"^2.0.8","mongoose":"^6.13.8","multer":"^1.4.5-lts.2","slugify":"^1.6.6","node-cron":"^3.0.3","nodemailer":"^6.9.13"},"devDependencies":{"nodemon":"^2.0.12"}}
 
 // FILE: populateTestData.js
 const mongoose = require("mongoose");
@@ -1396,6 +1598,75 @@ router.get("/tree/structured", async (req, res) => {
       .json({ success: false, error: "Server Error fetching category tree" });
   }
 });
+module.exports = router;
+
+// FILE: routes/contact.js
+const express = require("express");
+const router = express.Router();
+const { body, validationResult } = require("express-validator");
+const ConsultationRequest = require("../models/ConsultationRequest");
+const fetchuser = require("../middleware/fetchuser"); 
+const isSuperAdmin = require("../middleware/isSuperAdmin"); 
+router.post(
+  "/submit",
+  [
+    body("name", "Name is required and must be at least 2 characters")
+      .trim()
+      .isLength({ min: 2 }),
+    body("email", "Please enter a valid email address").trim().isEmail(),
+    body("company").optional().trim(),
+    body("message", "Message is required and must be at least 10 characters")
+      .trim()
+      .isLength({ min: 10 }),
+  ],
+  async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ success: false, errors: errors.array() });
+    }
+    try {
+      const { name, email, company, message } = req.body;
+      const newRequest = new ConsultationRequest({
+        name,
+        email,
+        company: company || null, 
+        message,
+        status: "New", 
+        emailedInBatch: false, 
+      });
+      await newRequest.save();
+      console.log(`New consultation request received from: ${email}`);
+      res.status(201).json({
+        success: true,
+        message: "Thank you for your request! We will get back to you soon.",
+      });
+    } catch (error) {
+      console.error("Error saving consultation request:", error);
+      res.status(500).json({
+        success: false,
+        error: "Server error processing your request.",
+      });
+    }
+  },
+);
+router.get(
+  "/requests",
+  fetchuser, 
+  isSuperAdmin, 
+  async (req, res) => {
+    try {
+      const requests = await ConsultationRequest.find({}).sort({
+        createdAt: -1,
+      }); 
+      res.json({ success: true, requests });
+    } catch (error) {
+      console.error("Error fetching consultation requests for admin:", error);
+      res
+        .status(500)
+        .json({ success: false, error: "Server error fetching requests." });
+    }
+  },
+);
 module.exports = router;
 
 // FILE: routes/notes.js

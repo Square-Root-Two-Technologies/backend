@@ -1,8 +1,8 @@
 // scheduler.js
 const cron = require("node-cron");
 const nodemailer = require("nodemailer");
-const User = require("./models/User"); // Adjust path if needed
-const ConsultationRequest = require("./models/ConsultationRequest"); // Adjust path if needed
+const User = require("../models/User"); // Adjust path if needed
+const ConsultationRequest = require("../models/ConsultationRequest"); // Adjust path if needed
 require("dotenv").config({ path: "./config.env" }); // Ensure env vars are loaded
 
 // --- Nodemailer Setup (Copied from index.js, now self-contained) ---
@@ -12,7 +12,7 @@ const transporter = nodemailer.createTransport({
   port: parseInt(process.env.MAILJET_PORT || "587", 10),
   secure: (process.env.MAILJET_PORT || "587") === "465",
   auth: {
-    user: process.env.MAILJET_API_KEY,    // Your Mailjet API Key
+    user: process.env.MAILJET_API_KEY, // Your Mailjet API Key
     pass: process.env.MAILJET_SECRET_KEY, // Your Mailjet Secret Key
   },
 });
@@ -26,11 +26,10 @@ transporter.verify(function (error, success) {
   }
 });
 
-
 // --- Define the Hourly Job Function ---
 const sendHourlyConsultationSummary = async () => {
   console.log(
-    `[${new Date().toISOString()}] Running hourly consultation request email job...`
+    `[${new Date().toISOString()}] Running hourly consultation request email job...`,
   );
   try {
     // 1. Find requests not yet emailed
@@ -50,24 +49,30 @@ const sendHourlyConsultationSummary = async () => {
     const adminEmails = superAdmins.map((admin) => admin.email);
 
     if (adminEmails.length === 0) {
-      console.warn("[Scheduler] No SuperAdmin users found. Cannot send batch email.");
+      console.warn(
+        "[Scheduler] No SuperAdmin users found. Cannot send batch email.",
+      );
       return; // Don't mark as emailed if not sent
     }
 
-    console.log(`[Scheduler] Sending batch email to: ${adminEmails.join(", ")}`);
+    console.log(
+      `[Scheduler] Sending batch email to: ${adminEmails.join(", ")}`,
+    );
 
     // 3. Format the email content
     let emailHtml = `<h1>Hourly Consultation Requests Summary</h1>`;
-    emailHtml += `<p>Received ${
-      newRequests.length
-    } new request(s) since the last summary:</p>`; // Adjusted wording
+    emailHtml += `<p>Received ${newRequests.length} new request(s) since the last summary:</p>`; // Adjusted wording
     emailHtml += "<ul>";
     newRequests.forEach((req) => {
       emailHtml += `
               <li style="margin-bottom: 15px; border-bottom: 1px solid #eee; padding-bottom: 10px;">
                   <strong>Name:</strong> ${req.name}<br/>
                   <strong>Email:</strong> ${req.email}<br/>
-                  ${req.company ? `<strong>Company:</strong> ${req.company}<br/>` : ""}
+                  ${
+                    req.company
+                      ? `<strong>Company:</strong> ${req.company}<br/>`
+                      : ""
+                  }
                   <strong>Received:</strong> ${req.createdAt.toLocaleString(
                     "en-IN",
                     { timeZone: "Asia/Kolkata" },
@@ -105,7 +110,6 @@ const sendHourlyConsultationSummary = async () => {
     // Consider adding more robust error logging/alerting here
   }
 };
-
 
 // --- Function to Start All Scheduled Jobs ---
 const startScheduledJobs = () => {

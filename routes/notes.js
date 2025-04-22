@@ -370,12 +370,14 @@ router.put(
       const adminRoles = ["admin", "SuperAdmin"];
       if (
         clientIsFeatured !== undefined &&
-        adminRoles.includes(requestingUser.role)
+        adminRoles.includes(req.requestingUser.role) // Corrected: Use req.requestingUser
       ) {
         updateFields.isFeatured = clientIsFeatured;
-      } else if (
+      }
+      // Access role via req.requestingUser.role
+      else if (
         clientIsFeatured !== undefined &&
-        !adminRoles.includes(requestingUser.role)
+        !adminRoles.includes(req.requestingUser.role) // Corrected: Use req.requestingUser
       ) {
         console.warn(
           `Non-admin/superadmin user ${req.user.id} tried to change isFeatured on update for note ${req.params.id}. Ignoring.`,
