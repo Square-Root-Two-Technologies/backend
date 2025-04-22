@@ -53,7 +53,6 @@ const ignoredRootFiles = new Set([
   ".env.local",
   ".env.development",
   ".env.production",
-  "populateTestData.js",
   // Add other sensitive or generated files you don’t want included
 ]);
 

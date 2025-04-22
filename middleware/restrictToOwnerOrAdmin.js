@@ -12,8 +12,12 @@ const restrictToOwnerOrAdmin = async (req, res, next) => {
   const user = await User.findById(req.user.id).select("role");
   if (!user) return res.status(401).json({ error: "User not found" });
 
-  if (note.user.toString() !== req.user.id && user.role !== "admin") {
-    return res.status(401).json({ error: "Not Allowed" });
+  const allowedRoles = ["admin", "SuperAdmin"];
+  if (
+    note.user.toString() !== req.user.id &&
+    !allowedRoles.includes(user.role)
+  ) {
+    return res.status(401).json({ error: "Not Allowed" }); // Keep generic error for security
   }
 
   req.note = note; // Pass note to next middleware
