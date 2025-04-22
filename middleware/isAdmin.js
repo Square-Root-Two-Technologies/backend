@@ -15,10 +15,12 @@ const isAdmin = async (req, res, next) => {
       return res.status(401).json({ success: false, error: "User not found." });
     }
 
-    if (user.role !== "admin") {
-      return res
-        .status(403)
-        .json({ success: false, error: "Forbidden: Admin access required." });
+    const allowedRoles = ["admin", "SuperAdmin"];
+    if (!allowedRoles.includes(user.role)) {
+      return res.status(403).json({
+        success: false,
+        error: "Forbidden: Admin or SuperAdmin access required.",
+      });
     }
 
     // Attach the requesting user's role for convenience in subsequent routes if needed

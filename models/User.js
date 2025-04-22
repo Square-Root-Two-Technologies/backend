@@ -41,7 +41,7 @@ const UserSchema = new Schema({
   role: {
     type: String,
     required: true,
-    enum: ["user", "admin"], // Define possible roles
+    enum: ["user", "admin", "SuperAdmin"], // Define possible roles
     default: "user", // Default role for new users
   },
   profilePictureUrl: {

@@ -124,7 +124,8 @@ router.get("/fetchallnotes", fetchuser, async (req, res) => {
       { path: "user", select: "name email profilePictureUrl" },
       { path: "category", select: "name" },
     ];
-    if (requestingUser.role === "admin") {
+    const adminRoles = ["admin", "SuperAdmin"];
+    if (adminRoles.includes(requestingUser.role)) {
       console.log(
         "Fetching all notes for admin user:",
         requestingUser.email || req.user.id,
@@ -225,13 +226,14 @@ router.post(
       }
 
       // Admin check for isFeatured
-      if (isFeatured && requestingUser.role !== "admin") {
+      const adminRoles = ["admin", "SuperAdmin"];
+      if (isFeatured && !adminRoles.includes(requestingUser.role)) {
         console.warn(
           `User ${requestingUser.email || req.user.id} (role: ${
             requestingUser.role
           }) attempted to set isFeatured=true on add. Forcing to false.`,
         );
-        isFeatured = false;
+        isFeatured = false; // Force to false if user is not admin/SuperAdmin
       }
 
       // --- Slug Generation Logic (same as before) ---
@@ -365,17 +367,18 @@ router.put(
       }
 
       // Handle isFeatured update (only by admin)
+      const adminRoles = ["admin", "SuperAdmin"];
       if (
         clientIsFeatured !== undefined &&
-        req.requestingUser.role === "admin"
+        adminRoles.includes(requestingUser.role)
       ) {
         updateFields.isFeatured = clientIsFeatured;
       } else if (
         clientIsFeatured !== undefined &&
-        req.requestingUser.role !== "admin"
+        !adminRoles.includes(requestingUser.role)
       ) {
         console.warn(
-          `Non-admin user ${req.user.id} tried to change isFeatured on update for note ${req.params.id}. Ignoring.`,
+          `Non-admin/superadmin user ${req.user.id} tried to change isFeatured on update for note ${req.params.id}. Ignoring.`,
         );
       }
 
