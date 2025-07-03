@@ -9,6 +9,7 @@ const { body, validationResult } = require("express-validator");
 const mongoose = require("mongoose");
 var restrictToOwnerOrAdmin = require("../middleware/restrictToOwnerOrAdmin");
 const slugify = require("slugify");
+const isAdmin = require("../middleware/isAdmin");
 
 // ... (fetchNotesIrrespective/:id, fetchNotesIrrespective, fetchallnotes, fetchNotesIrrespectiveByType/:type remain the same) ...
 // GET a specific note irrespective of user
