@@ -733,4 +733,49 @@ router.get("/by-category/:categoryId/titles", async (req, res) => {
   }
 });
 
+// ROUTE: Delete all notes in a specific category (Admin only)
+router.delete(
+  "/by-category/:categoryId",
+  fetchuser,
+  isAdmin,
+  async (req, res) => {
+    try {
+      const { categoryId } = req.params;
+
+      // Validate Category ID
+      if (!mongoose.Types.ObjectId.isValid(categoryId)) {
+        return res
+          .status(400)
+          .json({ success: false, error: "Invalid Category ID format" });
+      }
+
+      const category = await Category.findById(categoryId);
+      if (!category) {
+        return res
+          .status(404)
+          .json({ success: false, error: "Category not found" });
+      }
+
+      const result = await Note.deleteMany({ category: categoryId });
+
+      if (result.deletedCount === 0) {
+        return res.json({
+          success: true,
+          message: `No notes found in category '${category.name}' to delete.`,
+          deletedCount: 0,
+        });
+      }
+
+      res.json({
+        success: true,
+        message: `Successfully deleted ${result.deletedCount} note(s) from category '${category.name}'.`,
+        deletedCount: result.deletedCount,
+      });
+    } catch (error) {
+      console.error("Error deleting notes by category:", error);
+      res.status(500).json({ success: false, error: "Internal Server Error" });
+    }
+  },
+);
+
 module.exports = router;
