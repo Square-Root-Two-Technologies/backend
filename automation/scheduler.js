@@ -111,6 +111,21 @@ const sendHourlyConsultationSummary = async () => {
   }
 };
 
+// --- Self-ping to prevent Render free-tier spin-down ---
+// Render spins down after 15 min of inactivity; pinging every 14 min keeps
+// the server alive so end users never hit a cold start.
+const selfPing = () => {
+  const url = process.env.BACKEND_URL || "https://squareroottwo-backend.onrender.com";
+  const https = require("https");
+  const http = require("http");
+  const client = url.startsWith("https") ? https : http;
+  client.get(`${url}/ping`, (res) => {
+    console.log(`[KeepAlive] Self-ping ${res.statusCode} at ${new Date().toISOString()}`);
+  }).on("error", (e) => {
+    console.warn("[KeepAlive] Self-ping failed:", e.message);
+  });
+};
+
 // --- Function to Start All Scheduled Jobs ---
 const startScheduledJobs = () => {
   // Schedule the hourly job
@@ -119,13 +134,14 @@ const startScheduledJobs = () => {
     sendHourlyConsultationSummary,
     {
       scheduled: true,
-      timezone: "Asia/Kolkata", // Set to your server's or target timezone
+      timezone: "Asia/Kolkata",
     },
   );
-
   console.log("[Scheduler] Hourly consultation summary job scheduled.");
 
-  // Add other cron jobs here if needed in the future
+  // Keep-alive ping every 14 minutes (Render spins down after 15 min)
+  cron.schedule("*/14 * * * *", selfPing, { scheduled: true });
+  console.log("[Scheduler] Keep-alive self-ping scheduled every 14 minutes.");
 };
 
 module.exports = { startScheduledJobs }; // Export the function that starts the jobs
