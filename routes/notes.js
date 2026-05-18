@@ -149,30 +149,6 @@ router.get("/fetchallnotes", fetchuser, async (req, res) => {
 });
 
 // GET notes by type (irrespective of user)
-router.get("/fetchNotesIrrespectiveByType/:type", async (req, res) => {
-  // ... (no changes needed here)
-  try {
-    const type = req.params.type;
-    let query = {};
-    if (type && type !== "all") {
-      const validTypes = Note.schema.path("type").enumValues;
-      if (validTypes.includes(type)) {
-        query.type = type;
-      } else {
-        console.warn(`Invalid type requested: ${type}`);
-        // Return empty array or handle as needed for invalid type
-        return res.status(200).json([]);
-      }
-    }
-    const notes = await Note.find(query)
-      .populate("user", "name ")
-      .sort({ date: -1 });
-    res.status(200).json(notes);
-  } catch (err) {
-    console.error(err.message);
-    res.status(500).json({ error: "Internal Server Error" });
-  }
-});
 
 // POST Add a new Note using: POST "/api/notes/addnote". Login required
 router.post(
