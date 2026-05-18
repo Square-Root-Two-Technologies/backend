@@ -18,6 +18,7 @@ app.use("/api/auth", require("./routes/auth.routes"));
 app.use("/api/notes", require("./routes/notes.routes"));
 app.use("/api/categories", require("./routes/categories.routes"));
 app.use("/api/contact", require("./routes/contact.routes"));
+app.use("/api/photos", require("./routes/photos.routes"));
 
 startScheduledJobs();
 
