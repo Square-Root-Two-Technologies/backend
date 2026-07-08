@@ -44,6 +44,11 @@ const NotesSchema = new Schema(
       default: false,
       index: true,
     },
+    isActive: {
+      type: Boolean,
+      default: true,
+      index: true,
+    },
     slug: {
       type: String,
       required: true,

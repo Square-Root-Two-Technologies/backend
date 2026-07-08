@@ -50,7 +50,7 @@ async function getNoteById(id) {
     err.statusCode = 400;
     throw err;
   }
-  const note = await Note.findById(id)
+  const note = await Note.findOne({ _id: id, isActive: true })
     .populate("user", "name  _id role profilePictureUrl")
     .populate("category", "name");
   if (!note) {
@@ -62,7 +62,7 @@ async function getNoteById(id) {
 }
 
 async function getNoteBySlug(slug) {
-  const note = await Note.findOne({ slug })
+  const note = await Note.findOne({ slug, isActive: true })
     .populate("user", "name _id role profilePictureUrl")
     .populate("category", "name parent _id");
 
@@ -85,7 +85,7 @@ async function getNoteBySlug(slug) {
 }
 
 async function getAllNotes() {
-  return Note.find({})
+  return Note.find({ isActive: true })
     .populate("user", "name")
     .populate("category", "name")
     .sort({ date: -1 });
@@ -105,7 +105,7 @@ async function getUserNotes(userId, userRole) {
   return Note.find({ user: userId }).populate(populateFields).sort({ date: -1 });
 }
 
-async function addNote({ title, description, tag, categoryId, isFeatured, userId, userRole }) {
+async function addNote({ title, description, tag, categoryId, isFeatured, isActive, userId, userRole }) {
   const categoryExists = await Category.findById(categoryId);
   if (!categoryExists) {
     const err = new Error("Selected category does not exist");
@@ -128,6 +128,7 @@ async function addNote({ title, description, tag, categoryId, isFeatured, userId
     tag: tag || "General",
     category: categoryId,
     isFeatured,
+    isActive: isActive !== undefined ? isActive : true,
     user: userId,
   });
 
@@ -175,6 +176,10 @@ async function updateNote({ noteToUpdate, noteId, body, requestingUserRole }) {
     );
   }
 
+  if (body.isActive !== undefined) {
+    updateFields.isActive = body.isActive;
+  }
+
   if (Object.keys(updateFields).length === 0) {
     const err = new Error("No valid fields provided for update");
     err.statusCode = 400;
@@ -203,7 +208,7 @@ async function deleteNote(noteId) {
 }
 
 async function getPaginatedNotes({ lastId, categoryIdOrSlug, limit = 9 }) {
-  let query = {};
+  let query = { isActive: true };
 
   if (categoryIdOrSlug && categoryIdOrSlug !== "all") {
     let categoryFilter = null;
@@ -249,7 +254,7 @@ async function getPaginatedNotes({ lastId, categoryIdOrSlug, limit = 9 }) {
 }
 
 async function getFeaturedBatch({ lastId, limit = 5 }) {
-  let query = { isFeatured: true };
+  let query = { isFeatured: true, isActive: true };
 
   if (lastId) {
     if (!mongoose.Types.ObjectId.isValid(lastId)) {
@@ -269,7 +274,7 @@ async function getFeaturedBatch({ lastId, limit = 5 }) {
   const nextLastId = notes.length > 0 ? notes[notes.length - 1]._id : null;
   let hasMore = false;
   if (nextLastId) {
-    const remainingCount = await Note.countDocuments({ isFeatured: true, _id: { $lt: nextLastId } });
+    const remainingCount = await Note.countDocuments({ isFeatured: true, isActive: true, _id: { $lt: nextLastId } });
     hasMore = remainingCount > 0;
   }
 
@@ -277,7 +282,7 @@ async function getFeaturedBatch({ lastId, limit = 5 }) {
 }
 
 async function getFeaturedNotes(limit = 3) {
-  return Note.find({ isFeatured: true })
+  return Note.find({ isFeatured: true, isActive: true })
     .populate("user", "name profilePictureUrl")
     .populate("category", "name ")
     .sort({ date: -1 })
@@ -286,6 +291,7 @@ async function getFeaturedNotes(limit = 3) {
 
 async function searchNotes(searchQuery, limit = 20) {
   return Note.find({
+    isActive: true,
     $or: [
       { title: { $regex: searchQuery, $options: "i" } },
       { description: { $regex: searchQuery, $options: "i" } },
@@ -299,7 +305,7 @@ async function searchNotes(searchQuery, limit = 20) {
 }
 
 async function getRecentNotes(limit = 5) {
-  return Note.find({})
+  return Note.find({ isActive: true })
     .sort({ date: -1 })
     .limit(limit)
     .select("title _id date slug category tag")
@@ -320,7 +326,7 @@ async function getNotesByCategory({ categoryId, lastId, limit = 9 }) {
     throw err;
   }
 
-  let query = { category: category._id };
+  let query = { category: category._id, isActive: true };
 
   if (lastId) {
     if (!mongoose.Types.ObjectId.isValid(lastId)) {
@@ -341,7 +347,7 @@ async function getNotesByCategory({ categoryId, lastId, limit = 9 }) {
 
   let hasMore = false;
   if (nextLastId) {
-    const remainingCount = await Note.countDocuments({ category: category._id, _id: { $lt: nextLastId } });
+    const remainingCount = await Note.countDocuments({ category: category._id, isActive: true, _id: { $lt: nextLastId } });
     hasMore = remainingCount > 0;
   }
 
@@ -364,7 +370,7 @@ async function getNotesByCategoryTitles(categoryId) {
     throw err;
   }
 
-  const notes = await Note.find({ category: categoryId })
+  const notes = await Note.find({ category: categoryId, isActive: true })
     .select("_id title slug")
     .sort({ title: 1 })
     .lean();

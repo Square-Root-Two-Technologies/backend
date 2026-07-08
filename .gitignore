@@ -1,5 +1,6 @@
 
 config.env
+.local-mongo-data
 
 node_modules
 /.pnp

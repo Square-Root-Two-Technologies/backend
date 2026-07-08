@@ -28,6 +28,7 @@ router.post(
     body("category", "Category is required").isMongoId().withMessage("Invalid Category ID format."),
     body("tag").optional().trim().isString(),
     body("isFeatured").optional().isBoolean(),
+    body("isActive").optional().isBoolean(),
   ],
   notesController.addNote,
 );
@@ -43,6 +44,7 @@ router.put(
     body("category", "Invalid Category ID format").optional().isMongoId(),
     body("tag").optional().trim(),
     body("isFeatured").optional().isBoolean(),
+    body("isActive").optional().isBoolean(),
   ],
   notesController.updateNote,
 );

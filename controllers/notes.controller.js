@@ -64,6 +64,7 @@ async function addNote(req, res) {
 
     const { title, description, tag, category: categoryId } = req.body;
     const isFeatured = req.body.isFeatured || false;
+    const isActive = req.body.isActive !== undefined ? req.body.isActive : true;
 
     const populatedNote = await notesService.addNote({
       title,
@@ -71,6 +72,7 @@ async function addNote(req, res) {
       tag,
       categoryId,
       isFeatured,
+      isActive,
       userId: req.user.id,
       userRole: requestingUser.role,
     });
