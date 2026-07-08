@@ -1,9 +1,14 @@
 const User = require("../models/User");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
+const crypto = require("crypto");
 const { OAuth2Client } = require("google-auth-library");
 const cloudinary = require("../config/cloudinary");
 const config = require("../config/index");
+const { sendMail } = require("./email.service");
+
+const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:3000";
+const RESET_TOKEN_TTL_MS = 60 * 60 * 1000; // 1 hour
 
 const JWT_SECRET = config.jwtSecret;
 const GOOGLE_CLIENT_ID = config.googleClientId;
@@ -213,4 +218,78 @@ function uploadProfilePic(userId, fileBuffer) {
   });
 }
 
-module.exports = { createUser, loginUser, googleLoginUser, getUserById, updateUserProfile, uploadProfilePic };
+/**
+ * Generate a password reset token for the given email and send a reset link.
+ * Always resolves without error, even if the email isn't registered, so callers
+ * can't use response differences to enumerate accounts.
+ */
+async function requestPasswordReset(email) {
+  const user = await User.findOne({ email });
+  if (!user) {
+    console.log(`Password reset requested for unknown email: ${email}`);
+    return;
+  }
+
+  const rawToken = crypto.randomBytes(32).toString("hex");
+  const hashedToken = crypto.createHash("sha256").update(rawToken).digest("hex");
+
+  user.resetPasswordToken = hashedToken;
+  user.resetPasswordExpires = Date.now() + RESET_TOKEN_TTL_MS;
+  await user.save({ validateBeforeSave: false });
+
+  const resetLink = `${FRONTEND_URL}/reset-password/${rawToken}`;
+
+  try {
+    await sendMail({
+      from: `"Square Root Two" <${process.env.MAILJET_SENDER_EMAIL || "no-reply@squareroottwo.in"}>`,
+      to: user.email,
+      subject: "Reset your password",
+      html: `
+        <p>Hi ${user.name || ""},</p>
+        <p>Someone requested a password reset for your Square Root Two account. If this was you, click the link below to set a new password. This link expires in 1 hour.</p>
+        <p><a href="${resetLink}">${resetLink}</a></p>
+        <p>If you didn't request this, you can safely ignore this email.</p>
+      `,
+    });
+  } catch (err) {
+    // Don't fail the request over email delivery — log so it's visible in dev
+    // (e.g. no Mailjet credentials configured locally) and in prod server logs.
+    console.error(`Failed to send password reset email to ${user.email}:`, err.message);
+    console.log(`Password reset link for ${user.email}: ${resetLink}`);
+  }
+}
+
+/**
+ * Verify a reset token and set a new password.
+ */
+async function resetPassword(rawToken, newPassword) {
+  const hashedToken = crypto.createHash("sha256").update(rawToken).digest("hex");
+
+  const user = await User.findOne({
+    resetPasswordToken: hashedToken,
+    resetPasswordExpires: { $gt: Date.now() },
+  }).select("+resetPasswordToken +resetPasswordExpires");
+
+  if (!user) {
+    const err = new Error("This reset link is invalid or has expired. Please request a new one.");
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const salt = await bcrypt.genSalt(10);
+  user.password = await bcrypt.hash(newPassword, salt);
+  user.resetPasswordToken = undefined;
+  user.resetPasswordExpires = undefined;
+  await user.save();
+}
+
+module.exports = {
+  createUser,
+  loginUser,
+  googleLoginUser,
+  getUserById,
+  updateUserProfile,
+  uploadProfilePic,
+  requestPasswordReset,
+  resetPassword,
+};

@@ -41,6 +41,41 @@ async function login(req, res) {
   }
 }
 
+async function forgotPassword(req, res) {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({ success: false, errors: errors.array() });
+  }
+  try {
+    await authService.requestPasswordReset(req.body.email);
+    // Always return the same generic message, whether or not the email exists.
+    res.json({
+      success: true,
+      message: "If an account exists for that email, a password reset link has been sent.",
+    });
+  } catch (error) {
+    console.error("Error in /forgot-password:", error);
+    res.status(500).json({ success: false, error: "Internal Server Error" });
+  }
+}
+
+async function resetPassword(req, res) {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({ success: false, errors: errors.array() });
+  }
+  try {
+    await authService.resetPassword(req.params.token, req.body.password);
+    res.json({ success: true, message: "Password updated. You can now log in." });
+  } catch (error) {
+    if (error.statusCode === 400) {
+      return res.status(400).json({ success: false, error: error.message });
+    }
+    console.error("Error in /reset-password:", error);
+    res.status(500).json({ success: false, error: "Internal Server Error" });
+  }
+}
+
 async function googleLogin(req, res) {
   const { token } = req.body;
   if (!token) {
@@ -131,4 +166,13 @@ async function uploadProfilePicture(req, res) {
   }
 }
 
-module.exports = { register, login, googleLogin, getUser, updateProfile, uploadProfilePicture };
+module.exports = {
+  register,
+  login,
+  googleLogin,
+  getUser,
+  updateProfile,
+  uploadProfilePicture,
+  forgotPassword,
+  resetPassword,
+};

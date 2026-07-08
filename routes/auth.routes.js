@@ -37,6 +37,20 @@ router.post(
 // POST /api/auth/google-login — Google OAuth login
 router.post("/google-login", authController.googleLogin);
 
+// POST /api/auth/forgot-password — request a reset link by email
+router.post(
+  "/forgot-password",
+  [body("email", "Enter a valid email").isEmail()],
+  authController.forgotPassword,
+);
+
+// POST /api/auth/reset-password/:token — set a new password using a reset token
+router.post(
+  "/reset-password/:token",
+  [body("password", "Password must be atleast 5 characters").isLength({ min: 5 })],
+  authController.resetPassword,
+);
+
 // POST /api/auth/getuser — get logged-in user
 router.post("/getuser", fetchuser, authController.getUser);
 
