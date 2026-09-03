@@ -22,11 +22,14 @@ async function connect(req, res) {
 
 // GET /api/judge/oauth/callback — Salesforce redirects here, no auth-token header available
 async function callback(req, res) {
-  const { code, state, error: sfError } = req.query;
+  const { code, state, error: sfError, error_description: sfErrorDescription } = req.query;
   const fail = (message) =>
     res.redirect(`${config.frontendUrl}/apexjudge/connect?error=${encodeURIComponent(message)}`);
 
-  if (sfError) return fail(sfError);
+  if (sfError) {
+    console.error("Salesforce OAuth authorize error:", sfError, "-", sfErrorDescription);
+    return fail(sfErrorDescription ? `${sfError}: ${sfErrorDescription}` : sfError);
+  }
   if (!code || !state) return fail("Missing authorization code");
 
   let userId, codeVerifier;
