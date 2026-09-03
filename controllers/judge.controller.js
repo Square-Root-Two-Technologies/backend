@@ -10,8 +10,9 @@ const Submission = require("../models/Submission");
 // GET /api/judge/salesforce/connect
 async function connect(req, res) {
   try {
-    const state = jwt.sign({ userId: req.user.id }, config.jwtSecret, { expiresIn: "10m" });
-    const authorizeUrl = salesforceService.buildAuthorizeUrl(state);
+    const { codeVerifier, codeChallenge } = salesforceService.generatePkcePair();
+    const state = jwt.sign({ userId: req.user.id, codeVerifier }, config.jwtSecret, { expiresIn: "10m" });
+    const authorizeUrl = salesforceService.buildAuthorizeUrl(state, codeChallenge);
     res.json({ success: true, authorizeUrl });
   } catch (err) {
     console.error("Error building Salesforce authorize URL:", err.message);
@@ -19,7 +20,7 @@ async function connect(req, res) {
   }
 }
 
-// GET /api/judge/salesforce/callback — Salesforce redirects here, no auth-token header available
+// GET /api/judge/oauth/callback — Salesforce redirects here, no auth-token header available
 async function callback(req, res) {
   const { code, state, error: sfError } = req.query;
   const fail = (message) =>
@@ -28,15 +29,15 @@ async function callback(req, res) {
   if (sfError) return fail(sfError);
   if (!code || !state) return fail("Missing authorization code");
 
-  let userId;
+  let userId, codeVerifier;
   try {
-    ({ userId } = jwt.verify(state, config.jwtSecret));
+    ({ userId, codeVerifier } = jwt.verify(state, config.jwtSecret));
   } catch {
     return fail("Your connection attempt expired. Please try again.");
   }
 
   try {
-    const token = await salesforceService.exchangeCodeForToken(code);
+    const token = await salesforceService.exchangeCodeForToken(code, codeVerifier);
     const identity = await salesforceService.getIdentity(token.id, token.access_token);
     const orgInfo = await salesforceService.getOrgInfo(token.instance_url, token.access_token);
 

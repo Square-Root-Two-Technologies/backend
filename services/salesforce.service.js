@@ -1,27 +1,31 @@
 // services/salesforce.service.js
+const crypto = require("crypto");
 const config = require("../config/index");
 
 const LOGIN_BASE = "https://login.salesforce.com";
 const API_VERSION = "62.0";
 
-function buildAuthorizeUrl(state) {
+function buildAuthorizeUrl(state, codeChallenge) {
   const params = new URLSearchParams({
     response_type: "code",
     client_id: config.salesforce.clientId,
     redirect_uri: config.salesforce.callbackUrl,
     scope: "api refresh_token",
     state,
+    code_challenge: codeChallenge,
+    code_challenge_method: "S256",
   });
   return `${LOGIN_BASE}/services/oauth2/authorize?${params.toString()}`;
 }
 
-async function exchangeCodeForToken(code) {
+async function exchangeCodeForToken(code, codeVerifier) {
   const params = new URLSearchParams({
     grant_type: "authorization_code",
     code,
     client_id: config.salesforce.clientId,
     client_secret: config.salesforce.clientSecret,
     redirect_uri: config.salesforce.callbackUrl,
+    code_verifier: codeVerifier,
   });
 
   const res = await fetch(`${LOGIN_BASE}/services/oauth2/token`, {
@@ -160,9 +164,16 @@ async function executeAnonymous(instanceUrl, accessToken, apexCode) {
   };
 }
 
+function generatePkcePair() {
+  const codeVerifier = crypto.randomBytes(32).toString("base64url");
+  const codeChallenge = crypto.createHash("sha256").update(codeVerifier).digest("base64url");
+  return { codeVerifier, codeChallenge };
+}
+
 module.exports = {
   buildAuthorizeUrl,
   exchangeCodeForToken,
+  generatePkcePair,
   refreshAccessToken,
   getIdentity,
   getOrgInfo,

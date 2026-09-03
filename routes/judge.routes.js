@@ -6,8 +6,9 @@ const judgeController = require("../controllers/judge.controller");
 // GET /api/judge/salesforce/connect
 router.get("/salesforce/connect", fetchuser, judgeController.connect);
 
-// GET /api/judge/salesforce/callback — Salesforce redirects here directly, no auth-token header
-router.get("/salesforce/callback", judgeController.callback);
+// GET /api/judge/oauth/callback — must match SALESFORCE_CALLBACK_URL and the
+// Callback URL registered on the External Client App, not /salesforce/callback
+router.get("/oauth/callback", judgeController.callback);
 
 // GET /api/judge/salesforce/orgs
 router.get("/salesforce/orgs", fetchuser, judgeController.listOrgs);
